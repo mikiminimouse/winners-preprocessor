@@ -1,0 +1,47 @@
+# Базовый офлайн-образ с предзагруженными моделями PaddleOCR-VL
+# Модели уже включены в образ, не требуется доступ к интернету в runtime
+FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl:latest-gpu-sm120-offline
+
+# Установка системных зависимостей (если нужно)
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Установка зависимостей для FastAPI handler
+COPY requirements.txt /tmp/requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
+
+# Создаем рабочую директорию
+WORKDIR /app
+
+# Создаем директории для PaddleX cache с правами доступа
+RUN mkdir -p /.paddlex/temp /root/.paddlex/models /app/models && \
+    chmod -R 777 /.paddlex /root/.paddlex /app/models
+
+# Создаем директории для выходных файлов
+RUN mkdir -p /app/output /app/temp && \
+    chmod -R 777 /app/output /app/temp
+
+# Копируем код FastAPI handler
+COPY server.py /app/server.py
+
+# Открываем порты
+# 8081 - FastAPI handler (основной сервис OCR)
+EXPOSE 8081
+
+# Создаем скрипт запуска FastAPI handler
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+# Запускаем только FastAPI handler\n\
+# PaddleOCR-VL работает через PaddlePaddle бэкенд напрямую\n\
+# Модели уже предзагружены в офлайн-образе\n\
+echo "Starting FastAPI handler on port 8081..."\n\
+echo "Using offline image with pre-loaded models"\n\
+exec uvicorn server:app --host 0.0.0.0 --port 8081 --log-level info\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Запускаем FastAPI handler
+CMD ["/app/start.sh"]
+

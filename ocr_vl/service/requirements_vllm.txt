@@ -1,0 +1,19 @@
+# FastAPI и веб-сервер
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Работа с HTTP запросами
+requests>=2.31.0
+
+# Работа с изображениями
+Pillow>=10.0.0
+pdf2image>=1.16.0
+PyMuPDF>=1.23.0
+
+# Поддержка HF (если понадобится fallback-загрузка)
+huggingface_hub>=0.26.2
+
+# S3-совместимый клиент для cloud.ru Object Storage
+boto3>=1.28.0
+

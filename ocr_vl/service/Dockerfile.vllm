@@ -1,0 +1,79 @@
+# Dockerfile — PaddleOCR-VL Service (Variant B, vLLM, офлайн)
+# База: Paddle 3.2.0 GPU CUDA 12.6 (с предустановленным paddle)
+FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.2.0-gpu-cuda12.6
+
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PADDLEX_HOME=/home/paddleocr/.paddlex
+ENV OUTPUT_DIR=/workspace/output
+ENV HF_HOME=/home/paddleocr/.cache/huggingface
+
+# Системные зависимости для PDF/изображений
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils \
+    libgl1 \
+    libglib2.0-0 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Python зависимости (без переустановки paddle/paddleocr — они в базовом образе)
+COPY requirements_vllm.txt /tmp/requirements_vllm.txt
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r /tmp/requirements_vllm.txt && \
+    pip install --no-cache-dir --no-deps paddleocr==2.7.0.3 && \
+    pip install --no-cache-dir https://paddle-model-ecology.bj.bcebos.com/paddlex/whl/paddlex-3.0.0rc1-py3-none-any.whl && \
+    python - <<'PY'
+import importlib
+import sys
+mods=['paddle','paddleocr','paddlex','paddlex.pipelines']
+for m in mods:
+    try:
+        importlib.import_module(m)
+        print(f'OK {m}')
+    except Exception as e:
+        print(f'FAIL {m}: {e}', file=sys.stderr)
+        sys.exit(1)
+PY
+
+# Кладем офлайн-модели внутрь образа
+COPY offline_models/official_models /home/paddleocr/.paddlex/official_models
+COPY PP-StructureV3.yaml /app/PP-StructureV3.yaml
+COPY download_offline_models.py /app/download_offline_models.py
+RUN chmod -R 755 /home/paddleocr/.paddlex/official_models || true
+# Валидация/дозагрузка (если что-то отсутствует)
+RUN python3 /app/download_offline_models.py
+
+# Директории вывода
+RUN mkdir -p /app/output /app/temp /workspace/output && chmod -R 777 /app /workspace || true
+
+# Копируем сервер и стартовый скрипт (Variant B — vLLM orchestrator)
+COPY server_vllm.py /app/server.py
+COPY start_vllm.sh /app/start.sh
+COPY warmup_vllm.py /app/warmup_vllm.py
+RUN chmod +x /app/start.sh
+
+# Проверка наличия предзагруженных моделей
+RUN python3 << 'PYTHON_SCRIPT'
+from pathlib import Path
+models_dir = Path("/home/paddleocr/.paddlex/official_models")
+print("=" * 70)
+print("ПРОВЕРКА МОДЕЛЕЙ (вшито в образ)")
+total = 0
+if models_dir.exists():
+    for d in sorted(models_dir.iterdir()):
+        if d.is_dir():
+            sz = sum(f.stat().st_size for f in d.rglob('*') if f.is_file())
+            total += sz
+            print(f"✅ {d.name}: {sz/(1024*1024*1024):.2f} GB")
+    print(f"Итого: {total/(1024*1024*1024):.2f} GB")
+else:
+    print("⚠️  official_models отсутствует")
+print("=" * 70)
+PYTHON_SCRIPT
+
+EXPOSE 8081
+
+CMD ["/app/start.sh"]
+

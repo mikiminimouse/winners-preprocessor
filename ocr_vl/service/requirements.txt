@@ -1,0 +1,24 @@
+# FastAPI и веб-сервер
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Работа с HTTP запросами
+requests>=2.31.0
+
+# Работа с изображениями
+Pillow>=10.0.0
+
+# PDF rasterization
+pdf2image>=1.16.0
+PyMuPDF>=1.23.0
+
+# S3-совместимый клиент для cloud.ru Object Storage
+boto3>=1.28.0
+
+# Gradio для веб-интерфейса
+gradio>=4.0.0
+
+# OpenCV для визуализации результатов
+opencv-python>=4.8.0
+

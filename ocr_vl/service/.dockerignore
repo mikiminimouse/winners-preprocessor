@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation (except README)
+*.md
+!README.md
+
+# Output directories
+output/
+temp/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+test_*.py
+*_test.py
+tests/
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# Large directories to exclude
+archive/
+.cursor/
+data/
+preprocessing/
+docs/
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Docker related
+.docker/
+docker-compose*.yml
+

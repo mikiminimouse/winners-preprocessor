@@ -1,0 +1,75 @@
+/* Корпоративные цвета */
+:root {
+  --primary-color: #2563eb;
+  --primary-hover: #1d4ed8;
+  --secondary-color: #64748b;
+  --background-color: #f8fafc;
+  --text-color: #1e293b;
+  --border-color: #cbd5e1;
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --error-color: #ef4444;
+}
+
+/* Основной контейнер */
+.gradio-container {
+  background-color: var(--background-color);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Заголовки */
+h1, h2, h3 {
+  color: var(--primary-color);
+  border-bottom: 2px solid var(--primary-color);
+  padding-bottom: 10px;
+}
+
+/* Кнопки */
+button.primary {
+  background-color: var(--primary-color);
+  border: none;
+  color: white;
+  padding: 10px 20px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+button.primary:hover {
+  background-color: var(--primary-hover);
+}
+
+/* Поля ввода */
+input, textarea, select {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
+/* Результаты */
+.output-markdown {
+  background-color: white;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 15px;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.output-json {
+  background-color: white;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 15px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  white-space: pre-wrap;
+}
+
+/* Футер */
+footer {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-color);
+  text-align: center;
+  color: var(--secondary-color);
+  font-size: 0.9em;
+}

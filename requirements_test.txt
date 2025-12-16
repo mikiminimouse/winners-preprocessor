@@ -1,0 +1,14 @@
+# Зависимости для тестирования Cloud.RU ML Inference
+# Установка: pip install -r requirements_test.txt
+
+# Основные зависимости
+requests>=2.31.0
+urllib3>=2.0.0
+
+# SDK для Cloud.RU ML Inference (Evolution OpenAI API)
+evolution-openai>=1.0.0
+
+# Опционально: для загрузки .env файлов
+python-dotenv>=1.0.0
+
+

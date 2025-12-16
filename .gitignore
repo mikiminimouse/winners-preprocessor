@@ -1,0 +1,96 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Docker
+.env
+*.log
+
+# Данные
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
+temp/*
+!temp/.gitkeep
+extracted/*
+!extracted/.gitkeep
+normalized/*
+!normalized/.gitkeep
+archive/*
+!archive/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+
+
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Data directories
+data/
+*.log
+*.json
+!package*.json
+!requirements*.txt
+
+# Archive (keep structure but ignore large files)
+archive/**/*.log
+archive/**/__pycache__/
+
+# ML Models and large binary files
+ocr_vl/service/offline_models/
+*.bin
+*.onnx
+*.pb
+*.h5
+*.pkl
+*.pickle
+*.joblib
+*.model
+*.weights
+*.ckpt
+*.pth
+*.pt
+
+# Large data files
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.tiff
+*.tif
+*.bmp
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Test results and logs (keep structure)
+**/test_results/**/*.md
+**/test_results/**/*.json
+**/test_results/**/*.csv
+!**/test_results/.gitkeep
+
