@@ -5,6 +5,7 @@ FastAPI сервер для PaddleOCR-VL обработки изображени
 Сохранение: локально и в cloud.ru Object Storage
 """
 import os
+import math
 import io
 import json
 import base64
@@ -35,6 +36,17 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# КРИТИЧНО: отключаем сетевую проверку model hosters до импорта paddleocr/paddlex
+# PaddleX читает именно PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK (см. paddlex/utils/flags.py),
+# а сообщение в логах упоминает DISABLE_MODEL_SOURCE_CHECK только как "человеческое" имя флага.
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+os.environ.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")  # совместимость/документация
+logger.info(
+    "PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=%s; DISABLE_MODEL_SOURCE_CHECK=%s",
+    os.environ.get("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"),
+    os.environ.get("DISABLE_MODEL_SOURCE_CHECK"),
+)
 
 # КРИТИЧНО: Настройка PaddlePaddle для dynamic graph mode ДО импорта
 # Это должно решить проблему "int(Tensor) is not supported in static graph mode"
@@ -194,6 +206,11 @@ def init_paddleocr():
     if paddle_ocr is None:
         try:
             logger.info("Initializing PaddleOCR-VL (lazy initialization)...")
+
+            # Дополнительная защита: отключаем сетевую проверку model hosters
+            # (на случай если окружение было переопределено где-то выше)
+            os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+            os.environ.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
             
             # Устанавливаем переменные окружения для путей к моделям
             # В офлайн-образе модели находятся в /home/paddleocr/.paddlex

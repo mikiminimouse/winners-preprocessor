@@ -4,26 +4,40 @@
 # Проверяет доступность сервисов в зависимости от режима запуска
 # ============================================
 
-# Определяем режим запуска
-MODE=""
-if [ -n "$PORT" ]; then
-    if [ "$PORT" = "7860" ]; then
-        MODE="ui"
-    elif [ "$PORT" = "8081" ]; then
-        MODE="server"
-    elif [ "$PORT" = "dual" ] || [ -z "$PORT" ]; then
-        MODE="dual"
-    fi
-else
-    MODE="dual"  # По умолчанию
-fi
+# Определяем режим запуска только через переменную MODE
+# По умолчанию режим dual
+MODE="${MODE:-dual}"
 
-# Если режим не определен, используем dual
+# Если MODE не установлен или пустой, используем dual
 if [ -z "$MODE" ]; then
     MODE="dual"
 fi
 
 echo "Health check for mode: $MODE"
+
+# Функция для HTTP healthcheck (предпочтительно, потому что ss/netstat/lsof/nc могут отсутствовать в образе)
+check_http() {
+    local url="$1"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsS --max-time 2 "$url" >/dev/null 2>&1
+        return $?
+    fi
+    return 127
+}
+
+check_http_with_retry() {
+    local url="$1"
+    local attempts="${2:-15}"  # ~30s max (15 * 2s + sleeps)
+    local sleep_sec="${3:-2}"
+    local i
+    for i in $(seq 1 "$attempts"); do
+        if check_http "$url"; then
+            return 0
+        fi
+        sleep "$sleep_sec"
+    done
+    return 1
+}
 
 # Функция для проверки процесса по имени
 check_process() {
@@ -62,7 +76,11 @@ check_port() {
 # Проверка в зависимости от режима
 case "$MODE" in
     server)
-        # Проверяем FastAPI сервер
+        # Проверяем FastAPI сервер (сначала HTTP, потом process/port)
+        if check_http_with_retry "http://127.0.0.1:8081/health" 15 2; then
+            echo "Health check passed - FastAPI /health is reachable on port 8081"
+            exit 0
+        fi
         if check_process "uvicorn.*server:app" && check_port 8081; then
             echo "Health check passed - FastAPI server is running on port 8081"
             exit 0
@@ -72,7 +90,11 @@ case "$MODE" in
         fi
         ;;
     ui)
-        # Проверяем Gradio UI
+        # Проверяем Gradio UI (сначала HTTP, потом process/port)
+        if check_http_with_retry "http://127.0.0.1:7860/" 15 2; then
+            echo "Health check passed - Gradio UI is reachable on port 7860"
+            exit 0
+        fi
         if check_process "python.*gradio_app" && check_port 7860; then
             echo "Health check passed - Gradio UI is running on port 7860"
             exit 0
@@ -85,8 +107,18 @@ case "$MODE" in
         # Проверяем оба сервиса
         FASTAPI_OK=false
         GRADIO_OK=false
+
+        # Быстрый путь: HTTP checks
+        if check_http_with_retry "http://127.0.0.1:8081/health" 15 2; then
+            FASTAPI_OK=true
+            echo "FastAPI /health is reachable on port 8081"
+        fi
+        if check_http_with_retry "http://127.0.0.1:7860/" 15 2; then
+            GRADIO_OK=true
+            echo "Gradio UI is reachable on port 7860"
+        fi
         
-        if check_process "uvicorn.*server:app"; then
+        if [ "$FASTAPI_OK" = false ] && check_process "uvicorn.*server:app"; then
             if check_port 8081; then
                 FASTAPI_OK=true
                 echo "FastAPI server is running on port 8081"
@@ -94,10 +126,12 @@ case "$MODE" in
                 echo "FastAPI server process found but port 8081 is not listening"
             fi
         else
-            echo "FastAPI server process not found"
+            if [ "$FASTAPI_OK" = false ]; then
+                echo "FastAPI server process not found"
+            fi
         fi
         
-        if check_process "python.*gradio_app"; then
+        if [ "$GRADIO_OK" = false ] && check_process "python.*gradio_app"; then
             if check_port 7860; then
                 GRADIO_OK=true
                 echo "Gradio UI is running on port 7860"
@@ -105,7 +139,9 @@ case "$MODE" in
                 echo "Gradio UI process found but port 7860 is not listening"
             fi
         else
-            echo "Gradio UI process not found"
+            if [ "$GRADIO_OK" = false ]; then
+                echo "Gradio UI process not found"
+            fi
         fi
         
         if [ "$FASTAPI_OK" = true ] && [ "$GRADIO_OK" = true ]; then

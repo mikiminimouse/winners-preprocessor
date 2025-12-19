@@ -64,8 +64,8 @@ case "$MODE" in
         echo "LOG_LEVEL=$LOG_LEVEL"
         echo "COMPANY_NAME=$COMPANY_NAME"
         echo "Dynamic graph mode enabled (FLAGS_enable_eager_mode=1)"
-        
-        cd /app
+
+cd /app
         exec uvicorn server:app --host 0.0.0.0 --port ${PORT:-8081} --workers 1 --log-level debug
         ;;
     ui)

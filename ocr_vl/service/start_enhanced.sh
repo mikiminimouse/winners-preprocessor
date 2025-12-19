@@ -3,9 +3,9 @@
 # PaddleOCR-VL Service Enhanced Entrypoint
 # ============================================
 # Режимы запуска:
-#   dual        - Запуск обоих сервисов (по умолчанию)
-#   server      - Только FastAPI сервер
-#   ui          - Только Gradio Web UI
+#   dual        - Запуск обоих сервисов (FastAPI на 8081, Gradio на 7860)
+#   server      - Только FastAPI сервер (порт 8081)
+#   ui          - Только Gradio Web UI (порт 7860) - serverless режим
 # ============================================
 
 set -e
@@ -16,6 +16,9 @@ export HF_HOME=${HF_HOME:-/home/paddleocr/.cache/huggingface}
 export OUTPUT_DIR=${OUTPUT_DIR:-/workspace/output}
 export LOG_LEVEL=${LOG_LEVEL:-DEBUG}
 export COMPANY_NAME=${COMPANY_NAME:-"Winners Preprocessor"}
+# КРИТИЧНО: PaddleX читает именно PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK (а не DISABLE_MODEL_SOURCE_CHECK)
+# Поэтому фиксируем оба значения в True для офлайн-режима без сетевых проверок.
+export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=${PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK:-True}
 export DISABLE_MODEL_SOURCE_CHECK=${DISABLE_MODEL_SOURCE_CHECK:-True}
 
 # КРИТИЧНО: Отключаем static graph mode
@@ -23,31 +26,14 @@ export FLAGS_enable_eager_mode=1
 export FLAGS_eager_delete_tensor_gb=0
 export FLAGS_use_mkldnn=0
 
-# Определение режима: сначала из аргумента, затем автоматически по PORT
-MODE="${1:-}"
-
-# Автоматическое определение режима по PORT
-# Если PORT установлен и соответствует известным значениям, используем его для определения режима
-if [ -n "$PORT" ]; then
-    if [ "$PORT" = "7860" ]; then
-        MODE="ui"
-    elif [ "$PORT" = "8081" ]; then
-        MODE="server"
-    fi
-fi
-
-# Если MODE все еще не установлен, используем значение по умолчанию
-if [ -z "$MODE" ]; then
-    MODE="dual"  # По умолчанию запускаем оба сервиса
-fi
+# Определение режима только через переменную MODE
+# По умолчанию serverless режим (только UI)
+MODE="${MODE:-ui}"
 
 echo "============================================"
 echo "PaddleOCR-VL Service (Enhanced Mode)"
 echo "============================================"
 echo "Режим: $MODE"
-if [ -n "$PORT" ]; then
-    echo "PORT: $PORT (для одиночных режимов)"
-fi
 echo ""
 
 # Создаем директории
@@ -57,17 +43,29 @@ chmod -R 777 /workspace/output /app/output /app/temp 2>/dev/null || true
 # Функция для корректного завершения
 cleanup() {
     echo "Shutting down services..."
-    kill $FASTAPI_PID $GRADIO_PID 2>/dev/null || true
-    wait $FASTAPI_PID $GRADIO_PID 2>/dev/null || true
+    # Завершаем процессы в обратном порядке
+    if [ -n "$GRADIO_PID" ]; then
+        kill $GRADIO_PID 2>/dev/null || true
+    fi
+    if [ -n "$FASTAPI_PID" ]; then
+        kill $FASTAPI_PID 2>/dev/null || true
+    fi
+    # Ждем завершения всех процессов
+    if [ -n "$GRADIO_PID" ]; then
+        wait $GRADIO_PID 2>/dev/null || true
+    fi
+    if [ -n "$FASTAPI_PID" ]; then
+        wait $FASTAPI_PID 2>/dev/null || true
+    fi
     echo "Services stopped."
 }
 
 # Обрабатываем сигналы завершения
-trap cleanup SIGTERM SIGINT
+trap cleanup SIGTERM SIGINT EXIT
 
 case "$MODE" in
     server)
-        echo "Запуск FastAPI handler на порту ${PORT:-8081}..."
+        echo "Запуск FastAPI handler на порту 8081..."
         echo "Using offline image with pre-loaded models"
         echo "PADDLEX_HOME=$PADDLEX_HOME"
         echo "HF_HOME=$HF_HOME"
@@ -77,10 +75,10 @@ case "$MODE" in
         echo "Dynamic graph mode enabled (FLAGS_enable_eager_mode=1)"
         
         cd /app
-        exec uvicorn server:app --host 0.0.0.0 --port ${PORT:-8081} --workers 1 --log-level debug
+        exec uvicorn server:app --host 0.0.0.0 --port 8081 --workers 1 --log-level debug
         ;;
     ui)
-        echo "Запуск Gradio Web UI на порту ${PORT:-7860}..."
+        echo "Запуск Gradio Web UI на порту 7860 (serverless режим)..."
         echo "Using offline image with pre-loaded models"
         echo "PADDLEX_HOME=$PADDLEX_HOME"
         echo "HF_HOME=$HF_HOME"
@@ -124,7 +122,7 @@ case "$MODE" in
         echo "Доступные режимы:"
         echo "  dual        - Запуск обоих сервисов (FastAPI на 8081, Gradio на 7860)"
         echo "  server      - Только FastAPI сервер (порт 8081)"
-        echo "  ui          - Только Gradio Web UI (порт 7860)"
+        echo "  ui          - Только Gradio Web UI (порт 7860) - serverless режим"
         exit 1
         ;;
 esac

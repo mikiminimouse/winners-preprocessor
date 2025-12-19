@@ -1,0 +1,43 @@
+"""
+Merge - ручной контроль merge операций.
+"""
+import typer
+from pathlib import Path
+from typing import Optional
+
+from ..engine.merger import Merger
+from ..core.config import get_cycle_paths
+
+app = typer.Typer(name="merge", help="Управление merge операциями")
+
+
+@app.command("collect")
+def merge_collect(
+    source_dir: Path = typer.Option(..., "--source", help="Исходная директория"),
+    target_dir: Path = typer.Option(..., "--target", help="Целевая директория"),
+    cycle: Optional[int] = typer.Option(None, "--cycle", help="Номер цикла"),
+    from_all: bool = typer.Option(False, "--from-all", help="Собрать из всех Merge"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Подробный вывод"),
+):
+    """
+    Собирает UNIT из источников в целевую директорию.
+
+    При --from-all собирает из всех Merge_1, Merge_2, Merge_3.
+    """
+    merger = Merger()
+
+    if from_all:
+        # Собираем из всех Merge_N
+        source_dirs = []
+        processing_dir = source_dir.parent
+        for cycle_num in range(1, 4):
+            cycle_paths = get_cycle_paths(cycle_num, processing_dir)
+            source_dirs.append(cycle_paths["merge"])
+        typer.echo(f"Сборка из всех Merge: {target_dir}")
+    else:
+        source_dirs = [source_dir]
+        typer.echo(f"Сборка: {source_dir} -> {target_dir}")
+
+    result = merger.collect_units(source_dirs, target_dir, cycle)
+    typer.echo(f"Обработано UNIT: {result['units_processed']}")
+

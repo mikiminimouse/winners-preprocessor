@@ -29,6 +29,7 @@ COPY ocr_vl/service/start_local.sh /app/start_local.sh
 COPY ocr_vl/service/start_dual.sh /app/start_dual.sh
 COPY ocr_vl/service/start_enhanced.sh /app/start_enhanced.sh
 COPY ocr_vl/service/health_check.sh /app/health_check.sh
+COPY ocr_vl/service/VISUALIZATION_ALIGNMENT_FIX.md /app/VISUALIZATION_ALIGNMENT_FIX.md
 
 # Устанавливаем права на выполнение для скриптов
 RUN chmod +x /app/start.sh /app/start_local.sh /app/start_dual.sh /app/start_enhanced.sh /app/health_check.sh

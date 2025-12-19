@@ -1,0 +1,31 @@
+# Правила для разработки DocPrep
+
+## Общие принципы
+
+- Обработка директорий целиком, не отдельных файлов
+- CLI - тонкий слой, вся логика в engine
+- Manifest = состояние, Audit = история (никогда не смешиваются)
+- State Machine с строгими переходами
+- Idempotency: повторный запуск команды безопасен
+
+## Структура кода
+
+- `core/` - базовая инфраструктура (state machine, manifest, audit, config)
+- `engine/` - бизнес-логика обработки (classifier, converter, extractor, normalizers, merger)
+- `cli/` - CLI команды на Typer (тонкий слой над engine)
+- `adapters/` - адаптеры для внешних систем (Docling)
+- `utils/` - вспомогательные утилиты
+
+## Паттерны
+
+- Все операции обновляют manifest
+- Все операции логируются в audit log
+- State transitions валидируются через UnitStateMachine
+- Ошибки обрабатываются через исключения (PreprocessingError и наследники)
+
+## Документация
+
+- Основная документация: `docs/Final_plan/PlantoMake.md`
+- PRD: `docs/dev_contecxt_old/PRD.md`
+- Архитектура: `docs/dev_contecxt_old/ARCHITECTURE.md`
+

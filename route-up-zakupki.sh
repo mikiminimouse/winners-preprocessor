@@ -15,6 +15,8 @@ echo "$LOG_TAG dev=${DEV}, script started" >&2 || true
 # Можно расширять список/подсети по мере необходимости.
 HOSTS=(
   "zakupki.gov.ru"
+  "mongosber3.multitender.ru"
+  "mongosber4.multitender.ru"
 )
 
 for host in "${HOSTS[@]}"; do

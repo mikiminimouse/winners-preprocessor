@@ -19,9 +19,10 @@ logger = logging.getLogger(__name__)
 import sys
 sys.path.append('/app')
 
-# Отключаем проверку подключения к хостерам моделей для ускорения запуска
-import os
-os.environ['DISABLE_MODEL_SOURCE_CHECK'] = 'True'
+# Отключаем проверку подключения к хостерам моделей для ускорения запуска.
+# PaddleX использует PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK.
+os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
+os.environ['DISABLE_MODEL_SOURCE_CHECK'] = 'True'  # совместимость/документация
 
 try:
     from server import process_with_paddleocr, save_results_locally, init_paddleocr, generate_layout_visualization
@@ -291,15 +292,10 @@ logger.info("Инициализация PaddleOCR-VL при запуске пр�
 initialize_ocr()
 
 if __name__ == "__main__":
-    # Используем PORT из переменной окружения, по умолчанию 7860
-    # Обрабатываем как числовое значение порта, так и строковые значения режимов
-    port_env = os.getenv("PORT", "7860")
-    try:
-        port = int(port_env)
-    except ValueError:
-        # Если PORT не число (например, "dual"), используем порт по умолчанию
-        port = 7860
-    
+    # КРИТИЧНО: не используем PORT (в Cloud.ru это переменная для маппинга/инфры).
+    # Порт UI фиксированный: 7860. Управление режимом запуска только через MODE (start_enhanced.sh).
+    port = 7860
+
     demo.launch(
         server_name="0.0.0.0",
         server_port=port,
