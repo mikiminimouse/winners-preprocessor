@@ -3,13 +3,24 @@ Extractor - безопасная разархивация архивов (ZIP, R
 """
 import zipfile
 import subprocess
+import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from ..core.manifest import load_manifest, save_manifest, update_manifest_operation
 from ..core.audit import get_audit_logger
 from ..core.exceptions import OperationError, QuarantineError
+from ..core.state_machine import UnitState
+from ..core.unit_processor import (
+    move_unit_to_target,
+    update_unit_state,
+    determine_unit_extension,
+)
+from ..core.config import get_cycle_paths, MERGE_DIR
 from ..utils.file_ops import detect_file_type, sanitize_filename
+from ..utils.paths import get_unit_files
+
+logger = logging.getLogger(__name__)
 
 # Проверка доступности библиотек для архивов
 try:
@@ -49,21 +60,33 @@ class Extractor:
     def extract_unit(
         self,
         unit_path: Path,
+        cycle: int,
         max_depth: int = 2,
         keep_archive: bool = False,
         flatten: bool = False,
+        protocol_date: Optional[str] = None,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
         """
-        Извлекает все архивы в UNIT.
+        Извлекает все архивы в UNIT, перемещает UNIT в целевую директорию и обновляет state.
 
         Args:
             unit_path: Путь к директории UNIT
+            cycle: Номер цикла (1, 2, 3)
             max_depth: Максимальная глубина рекурсивной распаковки
             keep_archive: Сохранять ли исходный архив
             flatten: Размещать все файлы в одной директории
+            protocol_date: Дата протокола для организации по датам (опционально)
+            dry_run: Если True, только показывает что будет сделано
 
         Returns:
-            Словарь с результатами извлечения
+            Словарь с результатами извлечения:
+            - unit_id: идентификатор UNIT
+            - archives_processed: количество обработанных архивов
+            - files_extracted: количество извлеченных файлов
+            - extracted_files: список извлеченных файлов
+            - errors: список ошибок
+            - moved_to: путь к новой директории UNIT (после перемещения)
         """
         unit_id = unit_path.name
         correlation_id = self.audit_logger.get_correlation_id()
@@ -72,8 +95,13 @@ class Extractor:
         manifest_path = unit_path / "manifest.json"
         try:
             manifest = load_manifest(unit_path)
+            current_cycle = manifest.get("processing", {}).get("current_cycle", cycle)
+            if not protocol_date:
+                protocol_date = manifest.get("protocol_date")
         except FileNotFoundError:
             manifest = None
+            current_cycle = cycle
+            logger.warning(f"Manifest not found for unit {unit_id}, using cycle {cycle}")
 
         # Находим архивы
         archive_files = []
@@ -89,6 +117,17 @@ class Extractor:
                 "7z_archive",
             ]:
                 archive_files.append(file_path)
+
+        if not archive_files:
+            logger.info(f"No archives to extract in unit {unit_id}")
+            return {
+                "unit_id": unit_id,
+                "archives_processed": 0,
+                "files_extracted": 0,
+                "extracted_files": [],
+                "errors": [],
+                "moved_to": str(unit_path),
+            }
 
         extracted_files = []
         errors = []
@@ -106,19 +145,97 @@ class Extractor:
                         "type": "extract",
                         "archive_path": str(archive_path),
                         "extracted_count": len(result.get("files", [])),
-                        "cycle": manifest.get("processing", {}).get("current_cycle", 1),
+                        "cycle": current_cycle,
                     }
                     manifest = update_manifest_operation(manifest, operation)
             except QuarantineError as e:
                 errors.append(
                     {"file": str(archive_path), "error": str(e), "quarantined": True}
                 )
+                logger.error(f"Quarantined archive {archive_path}: {e}")
             except Exception as e:
                 errors.append({"file": str(archive_path), "error": str(e)})
+                logger.error(f"Failed to extract {archive_path}: {e}")
 
         # Сохраняем обновленный manifest
         if manifest:
             save_manifest(unit_path, manifest)
+
+        # Определяем расширение для сортировки из извлеченных файлов
+        extension = determine_unit_extension(unit_path)
+
+        # Определяем следующий цикл (после извлечения переходим к следующему циклу)
+        next_cycle = min(current_cycle + 1, 3)
+
+        # Перемещаем НАПРЯМУЮ в Merge_N/Extracted/ (без Processing_N+1/Direct/)
+        # Правильный путь: Data/YYYY-MM-DD/Merge, а не Data/Merge/YYYY-MM-DD
+        if protocol_date:
+            # Если указана дата, используем структуру Data/date/Merge
+            from ..core.config import DATA_BASE_DIR
+            merge_base = DATA_BASE_DIR / protocol_date / "Merge"
+        else:
+            merge_base = MERGE_DIR
+        
+        cycle_paths = get_cycle_paths(current_cycle, None, merge_base, None)
+        target_base_dir = cycle_paths["merge"] / "Extracted"
+
+        # Определяем новое состояние ПЕРЕД перемещением
+        # Проверяем текущее состояние из manifest
+        from ..core.state_machine import UnitStateMachine
+        state_machine = UnitStateMachine(unit_id, manifest_path)
+        current_state = state_machine.get_current_state()
+        
+        # Определяем целевое состояние
+        if current_state == UnitState.CLASSIFIED_1:
+            # Из CLASSIFIED_1 переходим в PENDING_EXTRACT, затем в CLASSIFIED_2
+            # Сначала переводим в PENDING_EXTRACT (если не dry_run)
+            if not dry_run:
+                update_unit_state(
+                    unit_path=unit_path,
+                    new_state=UnitState.PENDING_EXTRACT,
+                    cycle=current_cycle,
+                    operation={
+                        "type": "extract",
+                        "status": "pending",
+                    },
+                )
+            # Целевое состояние после извлечения
+            new_state = UnitState.CLASSIFIED_2
+        elif current_state == UnitState.PENDING_EXTRACT:
+            # Уже в PENDING_EXTRACT, переводим в CLASSIFIED_2
+            new_state = UnitState.CLASSIFIED_2
+        elif current_cycle == 2:
+            # Для цикла 2 переходим в CLASSIFIED_3
+            new_state = UnitState.CLASSIFIED_3
+        else:
+            # Для цикла 3 или выше - финальное состояние
+            new_state = UnitState.MERGED_PROCESSED
+
+        # Перемещаем UNIT в целевую директорию с учетом расширения
+        target_dir = move_unit_to_target(
+            unit_dir=unit_path,
+            target_base_dir=target_base_dir,
+            extension=extension,
+            dry_run=dry_run,
+        )
+
+        # Обновляем state machine после перемещения (если не dry_run)
+        if not dry_run:
+            # Перезагружаем state machine из нового местоположения
+            new_manifest_path = target_dir / "manifest.json"
+            state_machine = UnitStateMachine(unit_id, new_manifest_path)
+            
+            # Переходим в целевое состояние
+            update_unit_state(
+                unit_path=target_dir,
+                new_state=new_state,
+                cycle=next_cycle,
+                operation={
+                    "type": "extract",
+                    "archives_processed": len(archive_files),
+                    "files_extracted": len(extracted_files),
+                },
+            )
 
         # Логируем операцию
         self.audit_logger.log_event(
@@ -126,13 +243,16 @@ class Extractor:
             event_type="operation",
             operation="extract",
             details={
+                "cycle": current_cycle,
                 "archives_processed": len(archive_files),
                 "files_extracted": len(extracted_files),
+                "extension": extension,
+                "target_directory": str(target_dir),
                 "errors": errors,
             },
             state_before=manifest.get("state_machine", {}).get("current_state") if manifest else None,
-            state_after=None,
-            unit_path=unit_path,
+            state_after=new_state.value,
+            unit_path=target_dir,
         )
 
         return {
@@ -141,6 +261,9 @@ class Extractor:
             "files_extracted": len(extracted_files),
             "extracted_files": extracted_files,
             "errors": errors,
+            "moved_to": str(target_dir),
+            "next_cycle": next_cycle,
+            "extension": extension,
         }
 
     def _extract_archive(

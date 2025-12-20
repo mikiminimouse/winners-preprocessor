@@ -17,8 +17,38 @@ def inspect_tree(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Подробный вывод"),
 ):
     """Показать дерево директории."""
-    typer.echo(f"Дерево директории: {directory}")
-    # TODO: Реализовать вывод дерева
+    if not directory.exists():
+        typer.echo(f"❌ Директория не найдена: {directory}", err=True)
+        raise typer.Exit(1)
+    
+    typer.echo(f"📁 Дерево директории: {directory}\n")
+    
+    def print_tree(path: Path, prefix: str = "", is_last: bool = True):
+        """Рекурсивный вывод дерева."""
+        # Пропускаем служебные файлы и директории
+        if path.name.startswith('.') or path.name in ['__pycache__', 'node_modules']:
+            return
+        
+        # Определяем символ для текущего элемента
+        connector = "└── " if is_last else "├── "
+        typer.echo(f"{prefix}{connector}{path.name}")
+        
+        if path.is_dir():
+            # Получаем содержимое директории
+            try:
+                items = sorted([p for p in path.iterdir() 
+                              if not p.name.startswith('.') and p.name not in ['__pycache__', 'node_modules']],
+                             key=lambda x: (not x.is_dir(), x.name))
+                
+                if items:
+                    extension = "    " if is_last else "│   "
+                    for i, item in enumerate(items):
+                        is_last_item = (i == len(items) - 1)
+                        print_tree(item, prefix + extension, is_last_item)
+            except PermissionError:
+                typer.echo(f"{prefix}    [Permission denied]")
+    
+    print_tree(directory)
 
 
 @app.command("units")

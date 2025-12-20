@@ -16,6 +16,7 @@ from . import classifier
 from . import merge
 from . import inspect
 from . import utils
+from . import stats
 
 app = typer.Typer(
     name="docprep",
@@ -47,6 +48,7 @@ app.add_typer(classifier.app, name="classifier")
 app.add_typer(merge.app, name="merge")
 app.add_typer(inspect.app, name="inspect")
 app.add_typer(utils.app, name="utils")
+app.add_typer(stats.app, name="stats")
 
 
 @app.callback()

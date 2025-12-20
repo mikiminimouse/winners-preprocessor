@@ -4,12 +4,27 @@ Classifier - классификация файлов и определение �
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from collections import Counter
+import logging
 
-from ..core.manifest import load_manifest, save_manifest, update_manifest_state
-from ..core.state_machine import UnitState, UnitStateMachine
+from ..core.manifest import load_manifest
+from ..core.state_machine import UnitState
 from ..core.audit import get_audit_logger
+from ..core.unit_processor import (
+    create_unit_manifest_if_needed,
+    move_unit_to_target,
+    update_unit_state,
+    get_extension_subdirectory,
+    determine_unit_extension,
+)
+from ..core.config import (
+    get_processing_paths,
+    get_data_paths,
+    INPUT_DIR,
+)
 from ..utils.file_ops import detect_file_type
-from ..core.config import get_pending_paths
+from ..utils.paths import get_unit_files
+
+logger = logging.getLogger(__name__)
 
 
 class Classifier:
@@ -37,58 +52,214 @@ class Classifier:
         """Инициализирует Classifier."""
         self.audit_logger = get_audit_logger()
 
-    def classify_unit(self, unit_path: Path, cycle: int) -> Dict[str, Any]:
+    def classify_unit(
+        self,
+        unit_path: Path,
+        cycle: int,
+        protocol_date: Optional[str] = None,
+        protocol_id: Optional[str] = None,
+        dry_run: bool = False,
+        copy_mode: bool = False,
+    ) -> Dict[str, Any]:
         """
-        Классифицирует UNIT и определяет категорию обработки.
+        Классифицирует UNIT, создает manifest, перемещает UNIT в целевую директорию и обновляет state.
 
         Args:
             unit_path: Путь к директории UNIT
             cycle: Номер цикла (1, 2, 3)
+            protocol_date: Дата протокола (опционально)
+            protocol_id: ID протокола (опционально)
+            dry_run: Если True, только показывает что будет сделано
+            copy_mode: Если True, копирует вместо перемещения (сохраняет исходные файлы)
 
         Returns:
             Словарь с результатами классификации:
-            - category: категория (direct, convert, extract, normalize, special)
-            - unit_category: категория UNIT (может быть mixed)
+            - category: категория (direct, convert, extract, normalize, special, mixed)
+            - unit_category: категория UNIT
             - is_mixed: является ли UNIT mixed
             - file_classifications: классификация каждого файла
             - target_directory: целевая директория для UNIT
+            - moved_to: путь к новой директории UNIT (после перемещения)
         """
         unit_id = unit_path.name
-        correlation_id = self.audit_logger.get_correlation_id()
 
-        # Загружаем manifest если существует
-        manifest_path = unit_path / "manifest.json"
-        manifest = None
-        if manifest_path.exists():
+        # Автоматически включаем copy_mode для units из Input директории
+        # (для периода тестирования, чтобы не удалять исходные файлы)
+        if not copy_mode:
             try:
-                from ..core.manifest import load_manifest
+                # Проверяем, находится ли unit_path в Input директории
+                unit_path_real = unit_path.resolve()
+                
+                # Получаем все возможные пути к Input директории
+                is_in_input = False
+                
+                # Проверяем различные варианты путей Input
+                from datetime import datetime
+                current_date = datetime.now().strftime("%Y-%m-%d")
+                
+                # Пытаемся извлечь дату из пути unit_path
+                unit_parts = unit_path.parts
+                date_part = None
+                for part in unit_parts:
+                    if len(part) == 10 and part[4] == '-' and part[7] == '-':
+                        try:
+                            datetime.strptime(part, "%Y-%m-%d")
+                            date_part = part
+                            break
+                        except ValueError:
+                            continue
+                
+                # Список путей для проверки (только относительные части)
+                check_patterns = []
+                
+                # Стандартный путь Input (относительная часть)
+                input_dir_path = Path(INPUT_DIR)
+                check_patterns.append(str(input_dir_path))
+                
+                # Пути с датами (относительные части)
+                check_dates = [current_date]
+                if date_part:
+                    check_dates.append(date_part)
+                
+                for check_date in check_dates:
+                    try:
+                        data_paths = get_data_paths(check_date)
+                        dated_input_dir = data_paths["input"]
+                        check_patterns.append(str(dated_input_dir))
+                    except Exception:
+                        pass  # Игнорируем ошибки при получении путей
+                
+                # Проверяем каждый путь (проверяем наличие паттернов в пути unit)
+                unit_path_str = str(unit_path_real)
+                for pattern in check_patterns:
+                    if pattern in unit_path_str:
+                        is_in_input = True
+                        break
+                
+                # Дополнительная проверка: ищем "Input" в пути с датой
+                if not is_in_input:
+                    # Ищем паттерн вида "/YYYY-MM-DD/Input/"
+                    import re
+                    date_input_pattern = r"/\d{4}-\d{2}-\d{2}/Input/"
+                    if re.search(date_input_pattern, unit_path_str):
+                        is_in_input = True
+                
+                if is_in_input:
+                    copy_mode = True
+                    logger.debug(f"Auto-enabling copy_mode for unit from Input: {unit_id}")
+            except Exception as e:
+                logger.warning(f"Failed to check if unit is in Input directory: {e}")
+                # Игнорируем ошибки, оставляем copy_mode как есть
 
-                manifest = load_manifest(unit_path)
-            except Exception:
-                pass
-
-        # Находим все файлы в UNIT (исключаем служебные)
-        files = [
-            f
-            for f in unit_path.rglob("*")
-            if f.is_file()
-            and f.name not in ["manifest.json", "audit.log.jsonl"]
-            and not f.name.startswith(".")
-        ]
-
+        # Получаем файлы UNIT
+        files = get_unit_files(unit_path)
         if not files:
+            # Пустые UNIT идут в Exceptions/Ambiguous
+            target_base_dir = self._get_target_directory_base("unknown", cycle, protocol_date)
+            target_dir_base = target_base_dir / "Ambiguous"
+            
+            # Загружаем manifest если существует
+            manifest = None
+            manifest_path = unit_path / "manifest.json"
+            if manifest_path.exists():
+                try:
+                    manifest = load_manifest(unit_path)
+                    if not protocol_date:
+                        protocol_date = manifest.get("protocol_date")
+                    if not protocol_id:
+                        protocol_id = manifest.get("protocol_id")
+                except Exception as e:
+                    logger.warning(f"Failed to load manifest for {unit_id}: {e}")
+            
+            # Создаем manifest если его нет
+            if not manifest:
+                manifest = create_unit_manifest_if_needed(
+                    unit_path=unit_path,
+                    unit_id=unit_id,
+                    protocol_id=protocol_id,
+                    protocol_date=protocol_date,
+                    files=[],  # Пустой список файлов
+                    cycle=cycle,
+                )
+            
+            # Перемещаем пустой UNIT в Ambiguous
+            if not dry_run:
+                target_dir = move_unit_to_target(
+                    unit_dir=unit_path,
+                    target_base_dir=target_dir_base,
+                    extension=None,  # Exceptions не сортируются по расширениям
+                    dry_run=dry_run,
+                    copy_mode=copy_mode,
+                )
+                
+                # Обновляем state machine
+                new_state_map = {
+                    1: UnitState.CLASSIFIED_1,
+                    2: UnitState.CLASSIFIED_2,
+                    3: UnitState.CLASSIFIED_3,
+                }
+                new_state = new_state_map.get(cycle, UnitState.CLASSIFIED_1)
+                update_unit_state(
+                    unit_path=target_dir,
+                    new_state=new_state,
+                    cycle=cycle,
+                    operation={
+                        "type": "classify",
+                        "category": "unknown",
+                        "is_mixed": False,
+                        "file_count": 0,
+                        "reason": "empty_unit",
+                    },
+                )
+                
+                # Логируем классификацию
+                self.audit_logger.log_event(
+                    unit_id=unit_id,
+                    event_type="operation",
+                    operation="classify",
+                    details={
+                        "cycle": cycle,
+                        "category": "unknown",
+                        "is_mixed": False,
+                        "file_count": 0,
+                        "reason": "empty_unit",
+                        "target_directory": str(target_dir),
+                    },
+                    state_before="RAW",
+                    state_after=new_state.value,
+                    unit_path=target_dir,
+                )
+            else:
+                target_dir = target_dir_base / unit_path.name
+            
             return {
                 "category": "unknown",
                 "unit_category": "unknown",
                 "is_mixed": False,
                 "file_classifications": [],
-                "target_directory": None,
+                "target_directory": str(target_base_dir),
+                "moved_to": str(target_dir),
                 "error": "No files found in UNIT",
             }
+
+        # Загружаем manifest если существует
+        manifest = None
+        manifest_path = unit_path / "manifest.json"
+        if manifest_path.exists():
+            try:
+                manifest = load_manifest(unit_path)
+                # Используем protocol_date и protocol_id из manifest если они не предоставлены
+                if not protocol_date:
+                    protocol_date = manifest.get("protocol_date")
+                if not protocol_id:
+                    protocol_id = manifest.get("protocol_id")
+            except Exception as e:
+                logger.warning(f"Failed to load manifest for {unit_id}: {e}")
 
         # Классифицируем каждый файл
         file_classifications = []
         categories = []
+        classifications_by_file = []
 
         for file_path in files:
             classification = self._classify_file(file_path)
@@ -98,23 +269,300 @@ class Classifier:
                     "classification": classification,
                 }
             )
+            classifications_by_file.append(classification)
             categories.append(classification["category"])
 
         # Определяем категорию UNIT
         category_counts = Counter(categories)
         unique_categories = set(categories)
-        is_mixed = len(unique_categories) > 1
+        
+        # Проверяем mixed по категориям обработки
+        is_mixed_by_category = len(unique_categories) > 1
+        
+        # Проверяем mixed по типам файлов (даже если категории одинаковые)
+        detected_types = [fc.get("detected_type", "unknown") for fc in classifications_by_file]
+        unique_types = set(detected_types)
+        is_mixed_by_type = len(unique_types) > 1
+        
+        # UNIT считается mixed, если:
+        # 1. Файлы имеют разные категории обработки, ИЛИ
+        # 2. Файлы имеют разные типы (даже если категории одинаковые)
+        is_mixed = is_mixed_by_category or is_mixed_by_type
 
         # Определяем доминирующую категорию
         if is_mixed:
+            # Mixed units идут в Exceptions
             unit_category = "mixed"
         elif categories:
             unit_category = categories[0]
         else:
             unit_category = "unknown"
 
+        # Определяем расширение для сортировки на основе первой классификации
+        extension = None
+        if classifications_by_file and files:
+            first_classification = classifications_by_file[0]
+            first_file = files[0]
+            # Передаем original_extension из файла
+            original_ext = first_file.suffix.lower()
+            extension = get_extension_subdirectory(
+                category=unit_category,
+                classification=first_classification,
+                original_extension=original_ext,
+            )
+        # Fallback: определяем расширение из файлов
+        if not extension and files:
+            extension = files[0].suffix.lower().lstrip(".")
+        if not extension:
+            extension = determine_unit_extension(unit_path)
+
         # Определяем целевую директорию на основе категории
-        target_directory = self._get_target_directory(unit_category, cycle, unit_path)
+        target_base_dir = self._get_target_directory_base(unit_category, cycle, protocol_date)
+        
+        # Обрабатываем случай direct в циклах 2-3 (UNIT уже обработан, готов к merge)
+        if unit_category == "direct" and cycle > 1:
+            # UNIT уже обработан и готов к merge - переводим в MERGED_PROCESSED
+            # Не перемещаем UNIT, оставляем в текущем Merge_N или переводим в Ready2Docling
+            from ..core.state_machine import UnitStateMachine
+            state_machine = UnitStateMachine(unit_id, manifest_path)
+            current_state = state_machine.get_current_state()
+            
+            if current_state == UnitState.CLASSIFIED_2:
+                # UNIT готов к merge - переводим в MERGED_PROCESSED
+                # Оставляем UNIT в текущем месте (Merge_1) или перемещаем в Ready2Docling
+                from ..core.config import get_data_paths, READY2DOCLING_DIR
+                if protocol_date:
+                    data_paths = get_data_paths(protocol_date)
+                    ready_base = data_paths.get("ready2docling", READY2DOCLING_DIR)
+                else:
+                    ready_base = READY2DOCLING_DIR
+                
+                # Перемещаем в Ready2Docling с учетом расширения
+                target_dir = move_unit_to_target(
+                    unit_dir=unit_path,
+                    target_base_dir=ready_base,
+                    extension=extension,
+                    dry_run=dry_run,
+                    copy_mode=copy_mode,
+                )
+                
+                if not dry_run:
+                    update_unit_state(
+                        unit_path=target_dir,
+                        new_state=UnitState.MERGED_PROCESSED,
+                        cycle=cycle,
+                        operation={
+                            "type": "classify",
+                            "category": unit_category,
+                            "ready_for_docling": True,
+                            "file_count": len(files),
+                        },
+                    )
+                    new_state = UnitState.MERGED_PROCESSED
+                else:
+                    new_state = UnitState.MERGED_PROCESSED
+                
+                # Логируем операцию
+                self.audit_logger.log_event(
+                    unit_id=unit_id,
+                    event_type="operation",
+                    operation="classify",
+                    details={
+                        "cycle": cycle,
+                        "category": unit_category,
+                        "is_mixed": False,
+                        "file_count": len(files),
+                        "target_directory": str(target_dir),
+                        "ready_for_docling": True,
+                    },
+                    state_before=manifest.get("state_machine", {}).get("current_state") if manifest else "CLASSIFIED_2",
+                    state_after=new_state.value,
+                    unit_path=target_dir,
+                )
+                
+                return {
+                    "category": unit_category,
+                    "unit_category": unit_category,
+                    "is_mixed": False,
+                    "file_classifications": classifications_by_file,
+                    "target_directory": str(target_dir),
+                    "moved_to": str(target_dir),
+                }
+
+        # Создаем manifest если его нет
+        if not manifest:
+            # Подготавливаем информацию о файлах для manifest
+            manifest_files = []
+            for file_path, classification in zip(files, classifications_by_file):
+                detection = detect_file_type(file_path)
+                manifest_files.append({
+                    "original_name": file_path.name,
+                    "current_name": file_path.name,
+                    "mime_type": detection.get("mime_type", ""),
+                    "detected_type": classification.get("detected_type", "unknown"),
+                    "needs_ocr": detection.get("needs_ocr", False),
+                    "transformations": [],
+                })
+
+            manifest = create_unit_manifest_if_needed(
+                unit_path=unit_path,
+                unit_id=unit_id,
+                protocol_id=protocol_id,
+                protocol_date=protocol_date,
+                files=manifest_files,
+                cycle=cycle,
+            )
+
+        # Перемещаем UNIT в целевую директорию (с учетом расширения)
+        if unit_category == "direct" and cycle == 1:
+            # Direct файлы идут НАПРЯМУЮ в Merge_0/Direct/ (без Processing)
+            target_dir = move_unit_to_target(
+                unit_dir=unit_path,
+                target_base_dir=target_base_dir,
+                extension=extension,
+                dry_run=dry_run,
+                copy_mode=copy_mode,
+            )
+            # Обновляем state сначала на CLASSIFIED_1, затем на MERGED_DIRECT
+            if not dry_run:
+                # Сначала переходим в CLASSIFIED_1
+                update_unit_state(
+                    unit_path=target_dir,
+                    new_state=UnitState.CLASSIFIED_1,
+                    cycle=cycle,
+                    operation={
+                        "type": "classify",
+                        "category": unit_category,
+                        "direct_to_merge_0": True,
+                        "file_count": len(files),
+                    },
+                )
+                # Затем сразу в MERGED_DIRECT
+                update_unit_state(
+                    unit_path=target_dir,
+                    new_state=UnitState.MERGED_DIRECT,
+                    cycle=cycle,
+                    operation={
+                        "type": "classify",
+                        "category": unit_category,
+                        "direct_to_merge_0": True,
+                        "file_count": len(files),
+                    },
+                )
+                new_state = UnitState.MERGED_DIRECT
+            else:
+                new_state = UnitState.MERGED_DIRECT
+        elif unit_category in ["special", "mixed", "unknown"]:
+            # Для special, mixed и unknown используем subcategory как поддиректорию
+            if unit_category == "unknown":
+                # Unknown файлы идут в Ambiguous
+                subcategory = "Ambiguous"
+            elif unit_category == "mixed":
+                subcategory = "Mixed"
+            else:
+                subcategory = "Special"
+            
+            # Проверяем, есть ли ambiguous файлы (для mixed и special)
+            if unit_category != "unknown":
+                # Проверяем, есть ли ambiguous файлы (по scenario или по classification из Decision Engine)
+                has_ambiguous = any(
+                    (fc.get("classification", {}).get("scenario") and 
+                     "ambiguous" in str(fc.get("classification", {}).get("scenario", "")).lower()) or
+                    (fc.get("classification", {}).get("category") == "special" and 
+                     fc.get("classification", {}).get("scenario"))
+                    for fc in file_classifications
+                )
+                
+                # Если есть ambiguous файлы, идем в Ambiguous
+                if has_ambiguous:
+                    subcategory = "Ambiguous"
+                elif unit_category == "special":
+                    subcategory = "Special"  # Все special (не ambiguous) идут в Special
+            target_dir = move_unit_to_target(
+                unit_dir=unit_path,
+                target_base_dir=target_base_dir / subcategory,
+                extension=None,  # Exceptions не сортируются по расширениям
+                dry_run=dry_run,
+                copy_mode=copy_mode,
+            )
+            # Определяем новое состояние на основе цикла
+            new_state_map = {
+                1: UnitState.CLASSIFIED_1,
+                2: UnitState.CLASSIFIED_2,
+                3: UnitState.CLASSIFIED_3,
+            }
+            new_state = new_state_map.get(cycle, UnitState.CLASSIFIED_1)
+            # Обновляем state machine (если не dry_run)
+            if not dry_run:
+                update_unit_state(
+                    unit_path=target_dir,
+                    new_state=new_state,
+                    cycle=cycle,
+                    operation={
+                        "type": "classify",
+                        "category": unit_category,
+                        "is_mixed": is_mixed,
+                        "file_count": len(files),
+                    },
+                )
+        else:
+            # Для остальных категорий (convert, extract, normalize) сортируем по расширению
+            target_dir = move_unit_to_target(
+                unit_dir=unit_path,
+                target_base_dir=target_base_dir,
+                extension=extension,
+                dry_run=dry_run,
+                copy_mode=copy_mode,
+            )
+            # Определяем новое состояние на основе цикла и текущего состояния
+            # Проверяем текущее состояние из manifest
+            from ..core.state_machine import UnitStateMachine
+            state_machine = UnitStateMachine(unit_id, manifest_path)
+            current_state = state_machine.get_current_state()
+            
+            # Если UNIT уже в CLASSIFIED_2 и приходит из Merge (обработан), переводим в MERGED_PROCESSED
+            # Если UNIT в CLASSIFIED_2 и требует дальнейшей обработки, переводим в PENDING_*
+            if current_state == UnitState.CLASSIFIED_2:
+                # UNIT уже обработан, проверяем категорию
+                if unit_category == "direct":
+                    # Готов к merge - переводим в MERGED_PROCESSED
+                    new_state = UnitState.MERGED_PROCESSED
+                elif unit_category in ["convert", "extract", "normalize"]:
+                    # Требует дальнейшей обработки - переводим в PENDING_*
+                    pending_map = {
+                        "convert": UnitState.PENDING_CONVERT,
+                        "extract": UnitState.PENDING_EXTRACT,
+                        "normalize": UnitState.PENDING_NORMALIZE,
+                    }
+                    new_state = pending_map.get(unit_category, UnitState.MERGED_PROCESSED)
+                else:
+                    # Для mixed, unknown, special - переводим в MERGED_PROCESSED или EXCEPTION
+                    new_state = UnitState.MERGED_PROCESSED
+            elif unit_category == "direct" and cycle > 1:
+                # Direct категория в циклах 2-3 (из обработанных UNIT) - переводим в MERGED_PROCESSED
+                new_state = UnitState.MERGED_PROCESSED
+            else:
+                # Для других состояний используем стандартную логику
+                new_state_map = {
+                    1: UnitState.CLASSIFIED_1,
+                    2: UnitState.CLASSIFIED_2,
+                    3: UnitState.CLASSIFIED_3,
+                }
+                new_state = new_state_map.get(cycle, UnitState.CLASSIFIED_1)
+            
+            # Обновляем state machine (если не dry_run)
+            if not dry_run:
+                update_unit_state(
+                    unit_path=target_dir,
+                    new_state=new_state,
+                    cycle=cycle,
+                    operation={
+                        "type": "classify",
+                        "category": unit_category,
+                        "is_mixed": is_mixed,
+                        "file_count": len(files),
+                    },
+                )
 
         # Логируем классификацию
         self.audit_logger.log_event(
@@ -127,10 +575,12 @@ class Classifier:
                 "is_mixed": is_mixed,
                 "file_count": len(files),
                 "category_distribution": dict(category_counts),
+                "extension": extension,
+                "target_directory": str(target_dir),
             },
-            state_before=manifest.get("state_machine", {}).get("current_state") if manifest else None,
-            state_after="CLASSIFIED",
-            unit_path=unit_path,
+            state_before=manifest.get("state_machine", {}).get("current_state") if manifest else "RAW",
+            state_after=new_state.value,
+            unit_path=target_dir,
         )
 
         return {
@@ -138,13 +588,17 @@ class Classifier:
             "unit_category": unit_category,
             "is_mixed": is_mixed,
             "file_classifications": file_classifications,
-            "target_directory": target_directory,
+            "target_directory": str(target_base_dir),
+            "moved_to": str(target_dir),
             "category_distribution": dict(category_counts),
+            "extension": extension,
         }
 
     def _classify_file(self, file_path: Path) -> Dict[str, Any]:
         """
         Классифицирует отдельный файл.
+
+        Использует результат Decision Engine для определения категории.
 
         Args:
             file_path: Путь к файлу
@@ -156,6 +610,7 @@ class Classifier:
             - needs_conversion: требуется ли конвертация
             - needs_extraction: требуется ли разархивация
             - needs_normalization: требуется ли нормализация
+            - correct_extension: правильное расширение (если нужна нормализация)
         """
         extension = file_path.suffix.lower()
         detection = detect_file_type(file_path)
@@ -163,10 +618,12 @@ class Classifier:
         classification = {
             "category": "unknown",
             "detected_type": detection.get("detected_type", "unknown"),
+            "original_extension": extension,  # Сохраняем исходное расширение для сортировки
             "needs_conversion": False,
             "needs_extraction": False,
             "needs_normalization": False,
             "extension_matches_content": detection.get("extension_matches_content", True),
+            "correct_extension": detection.get("correct_extension"),
         }
 
         # Проверка на подписи
@@ -179,12 +636,13 @@ class Classifier:
             classification["category"] = "special"
             return classification
 
-        # Проверка на архивы
-        if detection.get("is_archive") or detection.get("detected_type") in [
-            "zip_archive",
-            "rar_archive",
-            "7z_archive",
-        ]:
+        # Проверка на архивы (проверяем расширение и detected_type)
+        archive_extensions = {".zip", ".rar", ".7z"}
+        archive_types = ["zip_archive", "rar_archive", "7z_archive"]
+        
+        if (extension in archive_extensions or 
+            detection.get("is_archive") or 
+            detection.get("detected_type") in archive_types):
             classification["category"] = "extract"
             classification["needs_extraction"] = True
             return classification
@@ -196,46 +654,95 @@ class Classifier:
             classification["needs_conversion"] = True
             return classification
 
-        # Проверка на необходимость нормализации
-        if not detection.get("extension_matches_content", True):
+        # Используем classification из Decision Engine
+        decision_classification = detection.get("classification")
+
+        if decision_classification == "normalize":
             classification["category"] = "normalize"
             classification["needs_normalization"] = True
+            classification["correct_extension"] = detection.get("correct_extension")
             return classification
 
-        # Прямая обработка (ready)
-        classification["category"] = "direct"
+        if decision_classification == "ambiguous":
+            classification["category"] = "special"  # Ambiguous → Exceptions
+            # Сохраняем scenario для проверки ambiguous
+            classification["scenario"] = detection.get("scenario", "ambiguous")
+            return classification
+
+        # Если Decision Engine вернул "unknown", оставляем как unknown
+        if decision_classification == "unknown":
+            classification["category"] = "unknown"  # Unknown → Exceptions/Ambiguous
+            return classification
+
+        # Если Decision Engine вернул "direct", обрабатываем как direct
+        if decision_classification == "direct":
+            classification["category"] = "direct"
+            return classification
+
+        # Fallback: если ничего не определено, проверяем detected_type
+        if detected_type and detected_type != "unknown":
+            # Если тип определен, но Decision Engine не дал классификацию, 
+            # проверяем, является ли это поддерживаемым форматом
+            if detected_type in ["pdf", "docx", "xlsx", "pptx"]:
+                classification["category"] = "direct"
+            else:
+                classification["category"] = "unknown"
+        else:
+            # Если тип не определен, это unknown
+            classification["category"] = "unknown"
+        
         return classification
 
-    def _get_target_directory(
-        self, category: str, cycle: int, unit_path: Path
-    ) -> Optional[Path]:
+    def _get_target_directory_base(
+        self, category: str, cycle: int, protocol_date: Optional[str] = None
+    ) -> Path:
         """
-        Определяет целевую директорию для UNIT на основе категории.
+        Определяет базовую целевую директорию для UNIT на основе категории.
+
+        Расширение будет добавлено позже через move_unit_to_target.
 
         Args:
             category: Категория UNIT
             cycle: Номер цикла
-            unit_path: Путь к UNIT (для определения базовой директории)
+            protocol_date: Дата протокола для организации по датам (опционально)
 
         Returns:
-            Путь к целевой директории или None
+            Базовая целевая директория (без учета расширения)
         """
-        try:
-            pending_paths = get_pending_paths(cycle, unit_path.parent.parent)
-        except Exception:
-            # Fallback на базовую структуру
-            from ..core.config import PROCESSING_DIR, get_pending_paths
+        # Если указана дата, получаем пути внутри Data/date/
+        if protocol_date:
+            data_paths = get_data_paths(protocol_date)
+        else:
+            # Без даты используем стандартные пути
+            data_paths = get_data_paths()
 
-            pending_paths = get_pending_paths(cycle, PROCESSING_DIR)
+        # Определяем базовую директорию в зависимости от категории
+        if category in ["special", "mixed", "unknown"]:
+            # Exceptions находится внутри директории с датой
+            exceptions_base = data_paths["exceptions"]
+            return exceptions_base / f"Exceptions_{cycle}"
+        elif category == "direct":
+            # Direct файлы идут НАПРЯМУЮ в Merge_0/Direct/ (только цикл 1)
+            if cycle == 1:
+                merge_base = data_paths["merge"]
+                return merge_base / "Merge_0" / "Direct"
+            else:
+                # В циклах 2-3 direct файлов быть не должно
+                # Если UNIT классифицируется как direct в цикле 2-3, это означает,
+                # что он уже обработан и готов к merge (MERGED_PROCESSED)
+                # Не создаем Merge_N/Direct, а оставляем в текущем Merge_N или переводим в Ready2Docling
+                # Возвращаем None, чтобы обработать это в основной логике
+                return None
+        else:
+            # Processing категории (convert, extract, normalize)
+            processing_base = data_paths["processing"]
+            processing_paths = get_processing_paths(cycle, processing_base)
 
-        category_mapping = {
-            "direct": pending_paths["direct"],
-            "convert": pending_paths["convert"],
-            "extract": pending_paths["extract"],
-            "normalize": pending_paths["normalize"],
-            "special": unit_path.parent.parent / "Exceptions" / f"Exceptions_{cycle}",
-            "mixed": pending_paths["normalize"],  # Mixed идет в normalize для обработки
-        }
+            category_mapping = {
+                "convert": processing_paths["Convert"],
+                "extract": processing_paths["Extract"],
+                "normalize": processing_paths["Normalize"],
+            }
 
-        return category_mapping.get(category)
+            return category_mapping.get(category, processing_paths["Convert"])
 

@@ -58,6 +58,25 @@ docprep inspect units Processing/2025-03-18
 
 # Manifest UNIT
 docprep inspect manifest UNIT_000123 --directory Ready2Docling/2025-03-18
+
+# Дерево структуры
+docprep inspect tree Data/2025-12-20
+```
+
+### Статистика и метрики
+
+```bash
+# Показать статистику
+docprep stats show 2025-12-20
+
+# Детальная статистика
+docprep stats show 2025-12-20 --detailed
+
+# Сравнить циклы
+docprep stats compare 2025-12-20 --cycle1 1 --cycle2 2
+
+# Экспорт статистики
+docprep stats export 2025-12-20 --format markdown --output report.md
 ```
 
 ## Архитектура
@@ -96,6 +115,48 @@ docprep/
 ├── utils/            # Утилиты
 └── schemas/          # JSON схемы
 ```
+
+## Тестирование
+
+Подробное руководство по тестированию через CLI: см. `docs/TESTING_GUIDE_CLI.md`
+
+### Быстрый старт тестирования
+
+```bash
+# 1. Инициализация структуры
+docprep utils init-date 2025-12-20
+
+# 2. Классификация (Цикл 1)
+docprep classifier run --input Data/2025-12-20/Input --cycle 1 --date 2025-12-20
+
+# 3. Обработка
+docprep substage convert run --input Data/2025-12-20/Processing/Processing_1/Convert --cycle 1 --date 2025-12-20
+docprep substage extract run --input Data/2025-12-20/Processing/Processing_1/Extract --cycle 1 --date 2025-12-20
+docprep substage normalize name --input Data/2025-12-20/Processing/Processing_1/Normalize --cycle 1 --date 2025-12-20
+docprep substage normalize extension --input Data/2025-12-20/Processing/Processing_1/Normalize --cycle 1 --date 2025-12-20
+
+# 4. Повторная классификация (Цикл 2)
+docprep classifier run --input Data/2025-12-20/Merge/Merge_1 --cycle 2 --date 2025-12-20
+
+# 5. Статистика
+docprep stats show 2025-12-20 --detailed
+```
+
+## Документация
+
+- **Архитектура:** `docs/ARCHITECTURE.md`
+- **Классификация и статистика:** `docs/CLASSIFICATION_AND_STATISTICS.md`
+- **Руководство по статистике:** `docs/STATISTICS_GUIDE.md`
+- **Руководство по тестированию CLI:** `docs/TESTING_GUIDE_CLI.md`
+- **Лог разработки:** `docs/DEVELOPMENT_LOG.md`
+
+## Требования
+
+- Python 3.8+
+- LibreOffice (для конвертации)
+- python-magic (для детекции файлов)
+- rarfile (для извлечения RAR)
+- py7zr (для извлечения 7Z)
 
 ## Лицензия
 

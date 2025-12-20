@@ -5,11 +5,21 @@ NameNormalizer - нормализация имен файлов.
 НЕ меняет тип файла, только имя.
 """
 import re
+import logging
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from ...core.manifest import load_manifest, save_manifest, update_manifest_operation
 from ...core.audit import get_audit_logger
+from ...core.state_machine import UnitState
+from ...core.unit_processor import (
+    move_unit_to_target,
+    update_unit_state,
+    determine_unit_extension,
+)
+from ...core.config import PROCESSING_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class NameNormalizer:
@@ -19,15 +29,29 @@ class NameNormalizer:
         """Инициализирует NameNormalizer."""
         self.audit_logger = get_audit_logger()
 
-    def normalize_names(self, unit_path: Path) -> Dict[str, Any]:
+    def normalize_names(
+        self,
+        unit_path: Path,
+        cycle: int,
+        protocol_date: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
         """
-        Нормализует имена всех файлов в UNIT.
+        Нормализует имена всех файлов в UNIT, перемещает UNIT и обновляет state.
 
         Args:
             unit_path: Путь к директории UNIT
+            cycle: Номер цикла (1, 2, 3)
+            protocol_date: Дата протокола для организации по датам (опционально)
+            dry_run: Если True, только показывает что будет сделано
 
         Returns:
-            Словарь с результатами нормализации
+            Словарь с результатами нормализации:
+            - unit_id: идентификатор UNIT
+            - files_normalized: количество нормализованных файлов
+            - normalized_files: список нормализованных файлов
+            - errors: список ошибок
+            - moved_to: путь к новой директории UNIT (после перемещения)
         """
         unit_id = unit_path.name
         correlation_id = self.audit_logger.get_correlation_id()
@@ -36,8 +60,13 @@ class NameNormalizer:
         manifest_path = unit_path / "manifest.json"
         try:
             manifest = load_manifest(unit_path)
+            current_cycle = manifest.get("processing", {}).get("current_cycle", cycle)
+            if not protocol_date:
+                protocol_date = manifest.get("protocol_date")
         except FileNotFoundError:
             manifest = None
+            current_cycle = cycle
+            logger.warning(f"Manifest not found for unit {unit_id}, using cycle {cycle}")
 
         # Находим все файлы
         files = [
@@ -57,7 +86,8 @@ class NameNormalizer:
                 if normalized_name != original_name:
                     # Переименовываем файл
                     new_path = file_path.parent / normalized_name
-                    file_path.rename(new_path)
+                    if not dry_run:
+                        file_path.rename(new_path)
 
                     normalized_files.append(
                         {
@@ -75,15 +105,25 @@ class NameNormalizer:
                             "subtype": "name",
                             "original_name": original_name,
                             "normalized_name": normalized_name,
-                            "cycle": manifest.get("processing", {}).get("current_cycle", 1),
+                            "cycle": current_cycle,
                         }
                         manifest = update_manifest_operation(manifest, operation)
             except Exception as e:
                 errors.append({"file": str(file_path), "error": str(e)})
+                logger.error(f"Failed to normalize name for {file_path}: {e}")
 
         # Сохраняем обновленный manifest
         if manifest:
             save_manifest(unit_path, manifest)
+
+        # После нормализации имени файлы остаются в той же директории Normalize
+        # (требуется также нормализация расширения через ExtensionNormalizer)
+        # Определяем расширение для сортировки
+        extension = determine_unit_extension(unit_path)
+
+        # Файлы остаются в той же директории (не перемещаем)
+        # ExtensionNormalizer обработает их после этого
+        target_dir = unit_path
 
         # Логируем операцию
         self.audit_logger.log_event(
@@ -92,12 +132,15 @@ class NameNormalizer:
             operation="normalize",
             details={
                 "subtype": "name",
+                "cycle": current_cycle,
                 "files_normalized": len(normalized_files),
+                "extension": extension,
+                "target_directory": str(target_dir),
                 "errors": errors,
             },
             state_before=manifest.get("state_machine", {}).get("current_state") if manifest else None,
-            state_after=None,
-            unit_path=unit_path,
+            state_after=manifest.get("state_machine", {}).get("current_state") if manifest else None,  # State не меняется
+            unit_path=target_dir,
         )
 
         return {
@@ -105,6 +148,8 @@ class NameNormalizer:
             "files_normalized": len(normalized_files),
             "normalized_files": normalized_files,
             "errors": errors,
+            "moved_to": str(target_dir),
+            "extension": extension,
         }
 
     def _normalize_filename(self, filename: str) -> str:

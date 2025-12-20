@@ -2,13 +2,24 @@
 Converter - конвертация файлов между форматами (doc→docx, xls→xlsx и т.д.).
 """
 import subprocess
+import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 from ..core.manifest import load_manifest, save_manifest, update_manifest_operation
 from ..core.audit import get_audit_logger
 from ..core.exceptions import OperationError, QuarantineError
+from ..core.state_machine import UnitState
+from ..core.unit_processor import (
+    move_unit_to_target,
+    update_unit_state,
+    determine_unit_extension,
+    get_extension_subdirectory,
+)
+from ..core.config import get_cycle_paths, MERGE_DIR
 from ..utils.file_ops import detect_file_type
+
+logger = logging.getLogger(__name__)
 
 
 class Converter:
@@ -35,21 +46,33 @@ class Converter:
     def convert_unit(
         self,
         unit_path: Path,
+        cycle: int,
         from_format: Optional[str] = None,
         to_format: Optional[str] = None,
         engine: str = "libreoffice",
+        protocol_date: Optional[str] = None,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
         """
-        Конвертирует все файлы в UNIT.
+        Конвертирует все файлы в UNIT, перемещает UNIT в целевую директорию и обновляет state.
 
         Args:
             unit_path: Путь к директории UNIT
+            cycle: Номер цикла (1, 2, 3)
             from_format: Исходный формат (опционально, определяется автоматически)
             to_format: Целевой формат (опционально, определяется автоматически)
             engine: Движок конвертации (по умолчанию "libreoffice")
+            protocol_date: Дата протокола для организации по датам (опционально)
+            dry_run: Если True, только показывает что будет сделано
 
         Returns:
-            Словарь с результатами конвертации
+            Словарь с результатами конвертации:
+            - unit_id: идентификатор UNIT
+            - files_converted: количество конвертированных файлов
+            - files_failed: количество ошибок
+            - converted_files: список конвертированных файлов
+            - errors: список ошибок
+            - moved_to: путь к новой директории UNIT (после перемещения)
         """
         unit_id = unit_path.name
         correlation_id = self.audit_logger.get_correlation_id()
@@ -58,8 +81,13 @@ class Converter:
         manifest_path = unit_path / "manifest.json"
         try:
             manifest = load_manifest(unit_path)
+            current_cycle = manifest.get("processing", {}).get("current_cycle", cycle)
+            if not protocol_date:
+                protocol_date = manifest.get("protocol_date")
         except FileNotFoundError:
             manifest = None
+            current_cycle = cycle
+            logger.warning(f"Manifest not found for unit {unit_id}, using cycle {cycle}")
 
         # Находим файлы для конвертации
         files_to_convert = []
@@ -81,13 +109,26 @@ class Converter:
                 target_format = to_format or self.CONVERSION_MAP[source_format]
                 files_to_convert.append((file_path, source_format, target_format))
 
+        if not files_to_convert:
+            logger.info(f"No files to convert in unit {unit_id}")
+            return {
+                "unit_id": unit_id,
+                "files_converted": 0,
+                "files_failed": 0,
+                "converted_files": [],
+                "errors": [],
+                "moved_to": str(unit_path),
+            }
+
         converted_files = []
         errors = []
+        target_format_used = None
 
         for file_path, source_format, target_format in files_to_convert:
             try:
                 result = self._convert_file(file_path, source_format, target_format, engine)
                 converted_files.append(result)
+                target_format_used = target_format  # Используем последний целевой формат
 
                 # Обновляем manifest
                 if manifest:
@@ -95,7 +136,7 @@ class Converter:
                         "type": "convert",
                         "from": source_format,
                         "to": target_format,
-                        "cycle": manifest.get("processing", {}).get("current_cycle", 1),
+                        "cycle": current_cycle,
                         "tool": engine,
                         "original_file": str(file_path),
                         "converted_file": result.get("output_path"),
@@ -103,10 +144,88 @@ class Converter:
                     manifest = update_manifest_operation(manifest, operation)
             except Exception as e:
                 errors.append({"file": str(file_path), "error": str(e)})
+                logger.error(f"Failed to convert {file_path}: {e}")
 
         # Сохраняем обновленный manifest
         if manifest:
             save_manifest(unit_path, manifest)
+
+        # Определяем следующий цикл (после конвертации переходим к следующему циклу)
+        next_cycle = min(current_cycle + 1, 3)
+
+        # Определяем расширение для сортировки (используем целевой формат после конвертации)
+        extension = target_format_used if target_format_used else determine_unit_extension(unit_path)
+
+        # Перемещаем НАПРЯМУЮ в Merge_N/Converted/ (без Processing_N+1/Direct/)
+        # Правильный путь: Data/YYYY-MM-DD/Merge, а не Data/Merge/YYYY-MM-DD
+        if protocol_date:
+            # Если указана дата, используем структуру Data/date/Merge
+            from ..core.config import DATA_BASE_DIR
+            merge_base = DATA_BASE_DIR / protocol_date / "Merge"
+        else:
+            merge_base = MERGE_DIR
+        
+        cycle_paths = get_cycle_paths(current_cycle, None, merge_base, None)
+        target_base_dir = cycle_paths["merge"] / "Converted"
+
+        # Определяем новое состояние ПЕРЕД перемещением
+        # Проверяем текущее состояние из manifest
+        from ..core.state_machine import UnitStateMachine
+        state_machine = UnitStateMachine(unit_id, manifest_path)
+        current_state = state_machine.get_current_state()
+        
+        # Определяем целевое состояние
+        if current_state == UnitState.CLASSIFIED_1:
+            # Из CLASSIFIED_1 переходим в PENDING_CONVERT, затем в CLASSIFIED_2
+            # Сначала переводим в PENDING_CONVERT (если не dry_run)
+            if not dry_run:
+                update_unit_state(
+                    unit_path=unit_path,
+                    new_state=UnitState.PENDING_CONVERT,
+                    cycle=current_cycle,
+                    operation={
+                        "type": "convert",
+                        "status": "pending",
+                    },
+                )
+            # Целевое состояние после конвертации
+            new_state = UnitState.CLASSIFIED_2
+        elif current_state == UnitState.PENDING_CONVERT:
+            # Уже в PENDING_CONVERT, переводим в CLASSIFIED_2
+            new_state = UnitState.CLASSIFIED_2
+        elif current_cycle == 2:
+            # Для цикла 2 переходим в CLASSIFIED_3
+            new_state = UnitState.CLASSIFIED_3
+        else:
+            # Для цикла 3 или выше - финальное состояние
+            new_state = UnitState.MERGED_PROCESSED
+
+        # Перемещаем UNIT в целевую директорию с учетом расширения
+        target_dir = move_unit_to_target(
+            unit_dir=unit_path,
+            target_base_dir=target_base_dir,
+            extension=extension,
+            dry_run=dry_run,
+        )
+
+        # Обновляем state machine после перемещения (если не dry_run)
+        if not dry_run:
+            # Перезагружаем state machine из нового местоположения
+            new_manifest_path = target_dir / "manifest.json"
+            state_machine = UnitStateMachine(unit_id, new_manifest_path)
+            current_state_after_move = state_machine.get_current_state()
+            
+            # Переходим в целевое состояние
+            update_unit_state(
+                unit_path=target_dir,
+                new_state=new_state,
+                cycle=next_cycle,
+                operation={
+                    "type": "convert",
+                    "files_converted": len(converted_files),
+                    "target_format": target_format_used,
+                },
+            )
 
         # Логируем операцию
         self.audit_logger.log_event(
@@ -114,13 +233,17 @@ class Converter:
             event_type="operation",
             operation="convert",
             details={
+                "cycle": current_cycle,
                 "files_converted": len(converted_files),
                 "files_failed": len(errors),
+                "target_format": target_format_used,
+                "extension": extension,
+                "target_directory": str(target_dir),
                 "errors": errors,
             },
             state_before=manifest.get("state_machine", {}).get("current_state") if manifest else None,
-            state_after=None,
-            unit_path=unit_path,
+            state_after=new_state.value,
+            unit_path=target_dir,
         )
 
         return {
@@ -129,6 +252,9 @@ class Converter:
             "files_failed": len(errors),
             "converted_files": converted_files,
             "errors": errors,
+            "moved_to": str(target_dir),
+            "next_cycle": next_cycle,
+            "extension": extension,
         }
 
     def _convert_file(

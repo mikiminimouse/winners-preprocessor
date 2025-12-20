@@ -73,8 +73,19 @@ class AuditLogger:
         if unit_path:
             log_path = unit_path / "audit.log.jsonl"
         else:
-            # Если путь не указан, создаем в текущей директории (для тестов)
-            log_path = Path(f"audit_{unit_id}.log.jsonl")
+            # Если путь не указан, это ошибка - логи должны сохраняться в директории UNIT
+            # Используем временную директорию для предотвращения создания файлов в корне
+            import warnings
+            warnings.warn(
+                f"log_event called without unit_path for {unit_id}. "
+                f"Audit log should be saved in UNIT directory. "
+                f"Using temporary location to prevent root directory pollution."
+            )
+            # Создаем в временной директории вместо корня проекта
+            import tempfile
+            temp_dir = Path(tempfile.gettempdir()) / "docprep_audit"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            log_path = temp_dir / f"audit_{unit_id}.log.jsonl"
 
         self._write_to_log(log_path, event)
 

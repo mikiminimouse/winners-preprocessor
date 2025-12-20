@@ -2,6 +2,7 @@
 Pipeline - полный прогон preprocessing (3 цикла подряд).
 """
 import typer
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -28,7 +29,7 @@ def pipeline_run(
     """
     Запускает полный цикл preprocessing (3 цикла подряд).
 
-    Выполняет: classifier → pending → merge для каждого цикла.
+    Выполняет: classifier → processing → merge для каждого цикла.
     """
     if verbose:
         typer.echo(f"Запуск полного pipeline: {input_dir} -> {output_dir}")
@@ -45,36 +46,45 @@ def pipeline_run(
     extractor_engine = Extractor()
     merger_engine = Merger()
 
+    # Определяем дату протокола из input_dir или используем текущую
+    protocol_date = datetime.now().strftime("%Y-%m-%d")
+    if "/" in str(input_dir) or "\\" in str(input_dir):
+        # Пытаемся извлечь дату из пути
+        parts = Path(input_dir).parts
+        for part in parts:
+            if part and len(part) == 10 and part[4] == "-" and part[7] == "-":
+                protocol_date = part
+                break
+
+    typer.echo(f"📅 Дата протокола: {protocol_date}")
+
     # Запускаем циклы
     for cycle_num in range(1, max_cycles + 1):
-        if verbose:
-            typer.echo(f"\n=== Цикл {cycle_num} ===")
+        typer.echo(f"\n{'='*60}")
+        typer.echo(f"🔄 ЦИКЛ {cycle_num} из {max_cycles}")
+        typer.echo(f"{'='*60}")
 
         try:
-            # Получаем пути для цикла
-            cycle_paths = get_cycle_paths(cycle_num, processing_dir)
-
-            # 1. Классификация
-            if verbose:
-                typer.echo(f"Классификация цикла {cycle_num}...")
-            # TODO: Реализовать классификацию всех UNIT в input_dir
-
-            # 2. Обработка Pending
-            if verbose:
-                typer.echo(f"Обработка Pending_{cycle_num}...")
-            # TODO: Реализовать обработку всех Pending директорий
-
-            # 3. Merge
-            if verbose:
-                typer.echo(f"Merge цикла {cycle_num}...")
-            # TODO: Реализовать merge в Merge_N
+            # Используем cycle_run для полного цикла
+            from ..cli.cycle import cycle_run
+            
+            cycle_input_dir = input_dir if cycle_num == 1 else None
+            
+            cycle_run(
+                cycle_num=cycle_num,
+                input_dir=cycle_input_dir,
+                protocol_date=protocol_date,
+                dry_run=dry_run,
+                verbose=verbose,
+            )
 
         except Exception as e:
             if stop_on_exception:
-                typer.echo(f"Ошибка в цикле {cycle_num}: {e}", err=True)
+                typer.echo(f"❌ Ошибка в цикле {cycle_num}: {e}", err=True)
                 raise
             else:
-                typer.echo(f"Предупреждение в цикле {cycle_num}: {e}", err=True)
+                typer.echo(f"⚠️  Предупреждение в цикле {cycle_num}: {e}", err=True)
+                continue
 
     # Финальный merge из всех Merge_N в Ready2Docling
     if verbose:

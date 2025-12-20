@@ -5,6 +5,8 @@ from .converter import Converter
 from .extractor import Extractor
 from .merger import Merger
 from .validator import Validator
+from .normalizers.name import NameNormalizer
+from .normalizers.extension import ExtensionNormalizer
 
 __all__ = [
     "Classifier",
@@ -12,5 +14,7 @@ __all__ = [
     "Extractor",
     "Merger",
     "Validator",
+    "NameNormalizer",
+    "ExtensionNormalizer",
 ]
 

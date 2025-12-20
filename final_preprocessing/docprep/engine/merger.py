@@ -57,20 +57,21 @@ class Merger:
                             "manifest": None,
                         }
 
-                    # Находим файлы
-                    files_dir = unit_dir / "files"
-                    if files_dir.exists():
-                        files = [f for f in files_dir.iterdir() if f.is_file()]
+                    # Находим файлы (приоритет файлам напрямую в unit_dir, затем в поддиректории files)
+                    files = [
+                        f
+                        for f in unit_dir.iterdir()
+                        if f.is_file()
+                        and f.name not in ["manifest.json", "audit.log.jsonl", "metadata.json"]
+                    ]
+                    if files:
                         all_units[unit_id]["files"].extend(files)
                     else:
-                        # Ищем файлы напрямую в unit_dir
-                        files = [
-                            f
-                            for f in unit_dir.iterdir()
-                            if f.is_file()
-                            and f.name not in ["manifest.json", "audit.log.jsonl", "metadata.json"]
-                        ]
-                        all_units[unit_id]["files"].extend(files)
+                        # Если файлов нет напрямую, проверяем поддиректорию files
+                        files_dir = unit_dir / "files"
+                        if files_dir.exists():
+                            files = [f for f in files_dir.iterdir() if f.is_file()]
+                            all_units[unit_id]["files"].extend(files)
 
                     # Загружаем manifest
                     manifest_path = unit_dir / "manifest.json"
@@ -105,20 +106,21 @@ class Merger:
                     dominant_type = "unknown"
 
                 # Определяем целевую директорию с сортировкой по расширению
-                target_subdir = self._get_target_subdir(dominant_type, files, target_dir)
+                target_subdir = self._get_target_subdir(
+                    dominant_type, files, target_dir, unit_info.get("manifest")
+                )
 
                 # Создаем директорию UNIT
                 target_unit_dir = target_subdir / unit_id
                 target_unit_dir.mkdir(parents=True, exist_ok=True)
 
-                # Копируем файлы
-                target_files_dir = target_unit_dir / "files"
-                target_files_dir.mkdir(parents=True, exist_ok=True)
-
+                # Копируем файлы напрямую в UNIT директорию (без поддиректории files)
                 copied_files = []
                 for file_path in files:
-                    target_file = target_files_dir / file_path.name
-                    shutil.copy2(file_path, target_file)
+                    target_file = target_unit_dir / file_path.name
+                    # Избегаем перезаписи существующих файлов
+                    if not target_file.exists():
+                        shutil.copy2(file_path, target_file)
                     copied_files.append(str(target_file))
 
                 # Копируем manifest если есть
@@ -167,14 +169,19 @@ class Merger:
             "errors": errors,
         }
 
-    def _get_target_subdir(self, file_type: str, files: List[Path], base_dir: Path) -> Path:
+    def _get_target_subdir(
+        self, file_type: str, files: List[Path], base_dir: Path, manifest: Optional[Dict] = None
+    ) -> Path:
         """
         Определяет целевую поддиректорию для UNIT на основе типа файлов.
+
+        Для PDF дополнительно сортирует на scan/text на основе needs_ocr из manifest.
 
         Args:
             file_type: Тип файла
             files: Список файлов
             base_dir: Базовая директория Ready2Docling
+            manifest: Manifest UNIT для получения needs_ocr
 
         Returns:
             Путь к целевой поддиректории
@@ -197,13 +204,53 @@ class Merger:
 
         # Для PDF дополнительная сортировка на scan/text
         if file_type == "pdf":
-            # Проверяем первый файл на наличие текстового слоя
-            if files:
-                detection = detect_file_type(files[0])
-                if detection.get("needs_ocr", True):
+            # Приоритет 1: Используем needs_ocr из manifest для каждого файла
+            pdf_files_need_ocr = []
+            
+            if manifest:
+                file_infos = manifest.get("files", [])
+                
+                for file_info in file_infos:
+                    file_name = file_info.get("current_name") or file_info.get("original_name", "")
+                    # Находим соответствующий файл
+                    matching_file = None
+                    for file_path in files:
+                        if file_path.name == file_name:
+                            matching_file = file_path
+                            break
+                    
+                    # Проверяем needs_ocr из manifest
+                    needs_ocr = file_info.get("needs_ocr", True)
+                    pdf_files_need_ocr.append(needs_ocr)
+            
+            # Если не нашли в manifest, проверяем файлы напрямую
+            if not pdf_files_need_ocr:
+                for file_path in files:
+                    if file_path.suffix.lower() == ".pdf":
+                        detection = detect_file_type(file_path)
+                        pdf_files_need_ocr.append(detection.get("needs_ocr", True))
+            
+            # Определяем поддиректорию на основе needs_ocr
+            if pdf_files_need_ocr:
+                # Если все PDF требуют OCR - scan, если ни один не требует - text
+                all_need_ocr = all(pdf_files_need_ocr)
+                none_need_ocr = not any(pdf_files_need_ocr)
+                
+                if all_need_ocr:
                     subdir_name = "pdf/scan"
-                else:
+                elif none_need_ocr:
                     subdir_name = "pdf/text"
+                else:
+                    # Смешанный случай - используем большинство
+                    needs_ocr_count = sum(pdf_files_need_ocr)
+                    subdir_name = "pdf/scan" if needs_ocr_count > len(pdf_files_need_ocr) / 2 else "pdf/text"
+            else:
+                # Fallback: если не удалось определить, проверяем первый файл
+                if files:
+                    detection = detect_file_type(files[0])
+                    subdir_name = "pdf/scan" if detection.get("needs_ocr", True) else "pdf/text"
+                else:
+                    subdir_name = "pdf"
 
         return base_dir / subdir_name
 

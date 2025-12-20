@@ -45,9 +45,10 @@ def get_cycle_paths(cycle: int, processing_base: Optional[Path] = None, merge_ba
 
     Returns:
         Словарь с путями:
-        - pending: Pending_N директория
+        - processing: Processing_N директория
         - merge: Merge_N директория
         - exceptions: Exceptions_N директория
+        - merge_0: Merge_0 директория (только для цикла 1, для Direct файлов)
     """
     if cycle < 1 or cycle > MAX_CYCLES:
         raise ValueError(f"Cycle must be between 1 and {MAX_CYCLES}, got {cycle}")
@@ -59,16 +60,22 @@ def get_cycle_paths(cycle: int, processing_base: Optional[Path] = None, merge_ba
     if exceptions_base is None:
         exceptions_base = EXCEPTIONS_DIR
 
-    return {
-        "pending": processing_base / f"Pending_{cycle}",
+    result = {
+        "processing": processing_base / f"Processing_{cycle}",
         "merge": merge_base / f"Merge_{cycle}",
         "exceptions": exceptions_base / f"Exceptions_{cycle}",
     }
+    
+    # Добавляем Merge_0 для прямых файлов (только для цикла 1)
+    if cycle == 1:
+        result["merge_0"] = merge_base / "Merge_0"
+    
+    return result
 
 
-def get_pending_paths(cycle: int, processing_base: Optional[Path] = None) -> Dict[str, Path]:
+def get_processing_paths(cycle: int, processing_base: Optional[Path] = None) -> Dict[str, Path]:
     """
-    Получает пути поддиректорий для Pending_N цикла.
+    Получает пути поддиректорий для Processing_N цикла.
 
     Args:
         cycle: Номер цикла (1, 2, 3)
@@ -76,21 +83,20 @@ def get_pending_paths(cycle: int, processing_base: Optional[Path] = None) -> Dic
 
     Returns:
         Словарь с путями:
-        - convert: директория для конвертации
-        - extract: директория для разархивации (archives)
-        - normalize: директория для нормализации
-        - direct: директория для прямых файлов
+        - Convert: директория для конвертации
+        - Extract: директория для разархивации
+        - Normalize: директория для нормализации
+        Примечание: Direct НЕ возвращается, так как Direct файлы идут напрямую в Merge_0/Direct/
     """
     if processing_base is None:
         processing_base = PROCESSING_DIR
     
-    pending_dir = processing_base / f"Pending_{cycle}"
+    processing_dir = processing_base / f"Processing_{cycle}"
 
     return {
-        "convert": pending_dir / "convert",
-        "extract": pending_dir / "archives",
-        "normalize": pending_dir / "normalize",
-        "direct": pending_dir / "direct",
+        "Convert": processing_dir / "Convert",
+        "Extract": processing_dir / "Extract",
+        "Normalize": processing_dir / "Normalize",
     }
 
 
@@ -99,7 +105,7 @@ def init_directory_structure(base_dir: Optional[Path] = None, date: Optional[str
     Инициализирует полную структуру директорий для обработки согласно PRD.
 
     Создает все необходимые директории для циклов обработки с поддиректориями по расширениям.
-    Если указана дата, создает структуру для конкретной даты.
+    Если указана дата, создает структуру для конкретной даты внутри Data/date/.
 
     Args:
         base_dir: Базовая директория (по умолчанию DATA_BASE_DIR)
@@ -108,67 +114,68 @@ def init_directory_structure(base_dir: Optional[Path] = None, date: Optional[str
     if base_dir is None:
         base_dir = DATA_BASE_DIR
 
-    # Создаем базовые директории
-    input_base = INPUT_DIR
-    processing_base = PROCESSING_DIR
-    merge_base = MERGE_DIR
-    exceptions_base = EXCEPTIONS_DIR
-    ready_base = READY2DOCLING_DIR
-
-    # Если указана дата, добавляем её в путь
+    # Если указана дата, создаем структуру внутри Data/date/
     if date:
-        processing_base = processing_base / date
-        merge_base = merge_base / date
-        exceptions_base = exceptions_base / date
-        ready_base = ready_base / date
-        input_base = input_base / date
+        # Создаем директорию с датой
+        date_dir = base_dir / date
+        date_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Все категории внутри директории с датой
+        input_base = date_dir / "Input"
+        processing_base = date_dir / "Processing"
+        merge_base = date_dir / "Merge"
+        exceptions_base = date_dir / "Exceptions"
+        ready_base = date_dir / "Ready2Docling"
+    else:
+        # Без даты используем стандартные пути
+        input_base = INPUT_DIR
+        processing_base = PROCESSING_DIR
+        merge_base = MERGE_DIR
+        exceptions_base = EXCEPTIONS_DIR
+        ready_base = READY2DOCLING_DIR
 
     # Создаем базовые директории
     input_base.mkdir(parents=True, exist_ok=True)
     ready_base.mkdir(parents=True, exist_ok=True)
 
+    # Создаем Merge_0/Direct/ (единственная Direct директория)
+    merge_0_dir = merge_base / "Merge_0"
+    direct_dir = merge_0_dir / "Direct"
+    for ext in EXTENSIONS_DIRECT:
+        (direct_dir / ext).mkdir(parents=True, exist_ok=True)
+
     # Создаем директории для каждого цикла
     for cycle in range(1, MAX_CYCLES + 1):
-        # Processing/Pending_N структура
-        pending_dir = processing_base / f"Pending_{cycle}"
-        pending_paths = get_pending_paths(cycle, processing_base)
+        # Processing/Processing_N структура
+        processing_dir = processing_base / f"Processing_{cycle}"
+        processing_paths = get_processing_paths(cycle, processing_base)
 
-        # Создаем поддиректории Pending с сортировкой по расширениям
-        # convert/ - по исходным расширениям
+        # Создаем поддиректории Processing с сортировкой по расширениям
+        # Direct/ НЕ создается - Direct файлы идут напрямую в Merge_0/Direct/
+        
+        # Convert/ - по исходным расширениям
         for ext in EXTENSIONS_CONVERT:
-            (pending_paths["convert"] / ext).mkdir(parents=True, exist_ok=True)
+            (processing_paths["Convert"] / ext).mkdir(parents=True, exist_ok=True)
 
-        # archives/ - по типам архивов
+        # Extract/ - по типам архивов
         for ext in EXTENSIONS_ARCHIVES:
-            (pending_paths["extract"] / ext).mkdir(parents=True, exist_ok=True)
+            (processing_paths["Extract"] / ext).mkdir(parents=True, exist_ok=True)
 
-        # direct/ - по расширениям готовых файлов
-        for ext in EXTENSIONS_DIRECT:
-            (pending_paths["direct"] / ext).mkdir(parents=True, exist_ok=True)
-
-        # normalize/ - по целевым расширениям
+        # Normalize/ - по целевым расширениям
         for ext in EXTENSIONS_NORMALIZE:
-            (pending_paths["normalize"] / ext).mkdir(parents=True, exist_ok=True)
+            (processing_paths["Normalize"] / ext).mkdir(parents=True, exist_ok=True)
 
         # Exceptions/Exceptions_N структура (отдельная директория, аналогично Merge)
         exceptions_dir = exceptions_base / f"Exceptions_{cycle}"
-        for subdir in ["special", "mixed", "unknown"]:
+        for subdir in ["Special", "Mixed", "Ambiguous"]:
             (exceptions_dir / subdir).mkdir(parents=True, exist_ok=True)
 
-        # Merge_N структура
+        # Merge_N структура (Merge_1, Merge_2, Merge_3 содержат Converted, Extracted, Normalized)
         merge_cycle_dir = merge_base / f"Merge_{cycle}"
-
-        if cycle == 1:
-            # Merge_1 содержит только direct/
-            direct_dir = merge_cycle_dir / "direct"
+        for category in ["Converted", "Extracted", "Normalized"]:
+            category_dir = merge_cycle_dir / category
             for ext in EXTENSIONS_DIRECT:
-                (direct_dir / ext).mkdir(parents=True, exist_ok=True)
-        else:
-            # Merge_2 и Merge_3 содержат extracted/, converted/, normalized/
-            for category in ["extracted", "converted", "normalized"]:
-                category_dir = merge_cycle_dir / category
-                for ext in EXTENSIONS_DIRECT:
-                    (category_dir / ext).mkdir(parents=True, exist_ok=True)
+                (category_dir / ext).mkdir(parents=True, exist_ok=True)
 
     # Ready2Docling структура с поддиректориями по расширениям
     for ext in EXTENSIONS_DIRECT:
@@ -185,6 +192,8 @@ def get_data_paths(date: Optional[str] = None) -> Dict[str, Path]:
     """
     Получает все базовые пути для работы с данными.
 
+    Если указана дата, возвращает пути внутри Data/date/, иначе стандартные пути.
+
     Args:
         date: Дата в формате YYYY-MM-DD (опционально)
 
@@ -196,17 +205,23 @@ def get_data_paths(date: Optional[str] = None) -> Dict[str, Path]:
         - exceptions: Exceptions директория
         - ready2docling: Ready2Docling директория
     """
-    paths = {
-        "input": INPUT_DIR,
-        "processing": PROCESSING_DIR,
-        "merge": MERGE_DIR,
-        "exceptions": EXCEPTIONS_DIR,
-        "ready2docling": READY2DOCLING_DIR,
-    }
-
     if date:
-        for key in paths:
-            paths[key] = paths[key] / date
-
-    return paths
+        # Если указана дата, все категории внутри Data/date/
+        date_dir = DATA_BASE_DIR / date
+        return {
+            "input": date_dir / "Input",
+            "processing": date_dir / "Processing",
+            "merge": date_dir / "Merge",
+            "exceptions": date_dir / "Exceptions",
+            "ready2docling": date_dir / "Ready2Docling",
+        }
+    else:
+        # Без даты используем стандартные пути
+        return {
+            "input": INPUT_DIR,
+            "processing": PROCESSING_DIR,
+            "merge": MERGE_DIR,
+            "exceptions": EXCEPTIONS_DIR,
+            "ready2docling": READY2DOCLING_DIR,
+        }
 
