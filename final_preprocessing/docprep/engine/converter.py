@@ -25,12 +25,20 @@ logger = logging.getLogger(__name__)
 class Converter:
     """Конвертер файлов через LibreOffice."""
 
-    # Поддерживаемые конвертации
+    # Поддерживаемые конвертации (source_format -> target_format)
     CONVERSION_MAP = {
         "doc": "docx",
         "xls": "xlsx",
         "ppt": "pptx",
         "rtf": "docx",
+    }
+    
+    # Маппинг форматов для LibreOffice (target_format -> LibreOffice format string)
+    # LibreOffice использует формат в виде расширения для --convert-to
+    LIBREOFFICE_FORMAT_MAP = {
+        "docx": "docx",
+        "xlsx": "xlsx",
+        "pptx": "pptx",
     }
 
     def __init__(self, libreoffice_path: str = "libreoffice"):
@@ -138,10 +146,28 @@ class Converter:
                         "to": target_format,
                         "cycle": current_cycle,
                         "tool": engine,
-                        "original_file": str(file_path),
-                        "converted_file": result.get("output_path"),
+                        "original_file": str(file_path.name),
+                        "converted_file": str(Path(result.get("output_path")).name),
                     }
                     manifest = update_manifest_operation(manifest, operation)
+                    
+                    # Обновляем информацию о файле в manifest
+                    files = manifest.get("files", [])
+                    for file_info in files:
+                        if file_info.get("original_name") == file_path.name or file_info.get("current_name") == file_path.name:
+                            # Обновляем current_name на конвертированный файл
+                            file_info["current_name"] = Path(result.get("output_path")).name
+                            file_info["detected_type"] = target_format
+                            # Добавляем информацию о трансформации
+                            if "transformations" not in file_info:
+                                file_info["transformations"] = []
+                            file_info["transformations"].append({
+                                "type": "convert",
+                                "from": source_format,
+                                "to": target_format,
+                                "cycle": current_cycle,
+                            })
+                            break
             except Exception as e:
                 errors.append({"file": str(file_path), "error": str(e)})
                 logger.error(f"Failed to convert {file_path}: {e}")
@@ -278,6 +304,10 @@ class Converter:
         if engine != "libreoffice":
             raise OperationError(f"Unsupported conversion engine: {engine}", operation="convert")
 
+        # Определяем формат для LibreOffice
+        # LibreOffice использует формат в виде расширения (без точки)
+        libreoffice_format = self.LIBREOFFICE_FORMAT_MAP.get(target_format, target_format)
+        
         # Определяем выходной путь
         output_dir = file_path.parent
         output_name = file_path.stem + "." + target_format
@@ -289,7 +319,7 @@ class Converter:
                 self.libreoffice_path,
                 "--headless",
                 "--convert-to",
-                target_format,
+                libreoffice_format,  # Используем правильный формат для LibreOffice
                 "--outdir",
                 str(output_dir),
                 str(file_path),
@@ -307,14 +337,33 @@ class Converter:
                 )
 
             # Проверяем, что выходной файл создан
+            # LibreOffice может создавать файл с другим именем (например, с пробелами)
             if not output_path.exists():
-                raise OperationError(
-                    f"Converted file not found: {output_path}",
-                    operation="convert",
-                )
+                # Пробуем найти файл с другим именем в той же директории
+                output_dir_files = list(output_dir.glob(f"{file_path.stem}.*"))
+                # Исключаем исходный файл
+                output_dir_files = [f for f in output_dir_files if f.suffix.lower() != file_path.suffix.lower()]
+                if output_dir_files:
+                    # Берем первый найденный файл с правильным расширением
+                    for found_file in output_dir_files:
+                        if found_file.suffix.lower() == f".{target_format}":
+                            output_path = found_file
+                            break
+                    else:
+                        # Если не нашли с правильным расширением, берем первый
+                        output_path = output_dir_files[0]
+                else:
+                    raise OperationError(
+                        f"Converted file not found: {output_path}. LibreOffice stdout: {result.stdout[:200] if result.stdout else 'empty'}",
+                        operation="convert",
+                    )
 
-            # Удаляем исходный файл (опционально, можно оставить)
-            # file_path.unlink()
+            # Удаляем исходный файл после успешной конвертации
+            if file_path.exists() and output_path.exists():
+                try:
+                    file_path.unlink()
+                except Exception as e:
+                    logger.warning(f"Failed to remove original file {file_path}: {e}")
 
             return {
                 "original_file": str(file_path),

@@ -19,6 +19,12 @@ HOSTS=(
   "mongosber4.multitender.ru"
 )
 
+# Прямые IP адреса для MongoDB серверов (если не резолвятся через DNS)
+# Добавляем маршрут для удаленной MongoDB (192.168.0.46)
+MONGODB_IPS=(
+  "192.168.0.46"
+)
+
 for host in "${HOSTS[@]}"; do
   # Разрешаем имя в один или несколько IP
   # getent более универсален, чем nslookup/host.
@@ -35,6 +41,12 @@ for host in "${HOSTS[@]}"; do
     echo "$LOG_TAG adding route $ip/32 via dev $DEV" >&2 || true
     ip route replace "$ip/32" dev "$DEV" metric 100 2>/dev/null || true
   done
+done
+
+# Добавляем маршруты для прямых IP адресов MongoDB
+for ip in "${MONGODB_IPS[@]}"; do
+  echo "$LOG_TAG adding route $ip/32 via dev $DEV" >&2 || true
+  ip route replace "$ip/32" dev "$DEV" metric 100 2>/dev/null || true
 done
 
 echo "$LOG_TAG done" >&2 || true

@@ -32,7 +32,7 @@ class UnitState(Enum):
 
 # Разрешенные переходы между состояниями
 ALLOWED_TRANSITIONS: Dict[UnitState, List[UnitState]] = {
-    UnitState.RAW: [UnitState.CLASSIFIED_1],
+    UnitState.RAW: [UnitState.CLASSIFIED_1, UnitState.EXCEPTION_1],  # EXCEPTION_1 для пустых UNIT
     UnitState.CLASSIFIED_1: [
         UnitState.MERGED_DIRECT,
         UnitState.PENDING_CONVERT,

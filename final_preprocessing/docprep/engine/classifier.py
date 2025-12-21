@@ -7,7 +7,7 @@ from collections import Counter
 import logging
 
 from ..core.manifest import load_manifest
-from ..core.state_machine import UnitState
+from ..core.state_machine import UnitState, UnitStateMachine
 from ..core.audit import get_audit_logger
 from ..core.unit_processor import (
     create_unit_manifest_if_needed,
@@ -154,9 +154,9 @@ class Classifier:
         # Получаем файлы UNIT
         files = get_unit_files(unit_path)
         if not files:
-            # Пустые UNIT идут в Exceptions/Ambiguous
-            target_base_dir = self._get_target_directory_base("unknown", cycle, protocol_date)
-            target_dir_base = target_base_dir / "Ambiguous"
+            # Пустые UNIT идут в Exceptions/Empty
+            target_base_dir = self._get_target_directory_base("empty", cycle, protocol_date)
+            target_dir_base = target_base_dir / "Empty"
             
             # Загружаем manifest если существует
             manifest = None
@@ -182,7 +182,7 @@ class Classifier:
                     cycle=cycle,
                 )
             
-            # Перемещаем пустой UNIT в Ambiguous
+            # Перемещаем пустой UNIT в Empty
             if not dry_run:
                 target_dir = move_unit_to_target(
                     unit_dir=unit_path,
@@ -192,24 +192,26 @@ class Classifier:
                     copy_mode=copy_mode,
                 )
                 
-                # Обновляем state machine
-                new_state_map = {
-                    1: UnitState.CLASSIFIED_1,
-                    2: UnitState.CLASSIFIED_2,
-                    3: UnitState.CLASSIFIED_3,
+                # Обновляем state machine - пустые UNIT сразу в EXCEPTION
+                exception_state_map = {
+                    1: UnitState.EXCEPTION_1,
+                    2: UnitState.EXCEPTION_2,
+                    3: UnitState.EXCEPTION_3,
                 }
-                new_state = new_state_map.get(cycle, UnitState.CLASSIFIED_1)
+                new_state = exception_state_map.get(cycle, UnitState.EXCEPTION_1)
                 update_unit_state(
                     unit_path=target_dir,
                     new_state=new_state,
                     cycle=cycle,
                     operation={
                         "type": "classify",
-                        "category": "unknown",
+                        "category": "empty",
                         "is_mixed": False,
                         "file_count": 0,
                         "reason": "empty_unit",
                     },
+                    final_cluster=f"Exceptions_{cycle}",
+                    final_reason="Empty unit with no files",
                 )
                 
                 # Логируем классификацию
@@ -219,11 +221,13 @@ class Classifier:
                     operation="classify",
                     details={
                         "cycle": cycle,
-                        "category": "unknown",
+                        "category": "empty",
                         "is_mixed": False,
                         "file_count": 0,
                         "reason": "empty_unit",
                         "target_directory": str(target_dir),
+                        "final_cluster": f"Exceptions_{cycle}",
+                        "final_reason": "Empty unit with no files",
                     },
                     state_before="RAW",
                     state_after=new_state.value,
@@ -233,8 +237,8 @@ class Classifier:
                 target_dir = target_dir_base / unit_path.name
             
             return {
-                "category": "unknown",
-                "unit_category": "unknown",
+                "category": "empty",
+                "unit_category": "empty",
                 "is_mixed": False,
                 "file_classifications": [],
                 "target_directory": str(target_base_dir),
@@ -485,15 +489,37 @@ class Classifier:
                 dry_run=dry_run,
                 copy_mode=copy_mode,
             )
-            # Определяем новое состояние на основе цикла
-            new_state_map = {
-                1: UnitState.CLASSIFIED_1,
-                2: UnitState.CLASSIFIED_2,
-                3: UnitState.CLASSIFIED_3,
+            # Для exceptions (mixed, special, ambiguous, unknown, empty) используем EXCEPTION_N состояния
+            exception_state_map = {
+                1: UnitState.EXCEPTION_1,
+                2: UnitState.EXCEPTION_2,
+                3: UnitState.EXCEPTION_3,
             }
-            new_state = new_state_map.get(cycle, UnitState.CLASSIFIED_1)
-            # Обновляем state machine (если не dry_run)
-            if not dry_run:
+            new_state = exception_state_map.get(cycle, UnitState.EXCEPTION_1)
+            
+            # Проверяем текущее состояние перед обновлением
+            manifest_path = target_dir / "manifest.json"
+            if manifest_path.exists():
+                try:
+                    manifest = load_manifest(target_dir)
+                    state_machine = UnitStateMachine(unit_id, manifest_path)
+                    current_state = state_machine.get_current_state()
+                    
+                    # Если UNIT уже в нужном состоянии для exceptions, не обновляем
+                    if current_state == new_state:
+                        # UNIT уже в правильном состоянии для exceptions - не обновляем
+                        should_update_state = False
+                    else:
+                        should_update_state = True
+                except Exception:
+                    # Если не удалось загрузить manifest, обновляем состояние
+                    should_update_state = True
+            else:
+                # Нет manifest - обновляем состояние
+                should_update_state = True
+            
+            # Обновляем state machine (если не dry_run и состояние изменилось)
+            if not dry_run and should_update_state:
                 update_unit_state(
                     unit_path=target_dir,
                     new_state=new_state,
@@ -516,6 +542,7 @@ class Classifier:
             )
             # Определяем новое состояние на основе цикла и текущего состояния
             # Проверяем текущее состояние из manifest
+            manifest_path = target_dir / "manifest.json"
             from ..core.state_machine import UnitStateMachine
             state_machine = UnitStateMachine(unit_id, manifest_path)
             current_state = state_machine.get_current_state()
@@ -538,15 +565,21 @@ class Classifier:
                 else:
                     # Для mixed, unknown, special - переводим в MERGED_PROCESSED или EXCEPTION
                     new_state = UnitState.MERGED_PROCESSED
+            elif current_state == UnitState.CLASSIFIED_3:
+                # UNIT уже в CLASSIFIED_3 - переводим в MERGED_PROCESSED
+                new_state = UnitState.MERGED_PROCESSED
             elif unit_category == "direct" and cycle > 1:
                 # Direct категория в циклах 2-3 (из обработанных UNIT) - переводим в MERGED_PROCESSED
+                new_state = UnitState.MERGED_PROCESSED
+            elif cycle == 3 and current_state in [UnitState.CLASSIFIED_2, UnitState.MERGED_PROCESSED]:
+                # Для цикла 3, если UNIT уже в CLASSIFIED_2 или MERGED_PROCESSED, переводим в MERGED_PROCESSED
                 new_state = UnitState.MERGED_PROCESSED
             else:
                 # Для других состояний используем стандартную логику
                 new_state_map = {
                     1: UnitState.CLASSIFIED_1,
                     2: UnitState.CLASSIFIED_2,
-                    3: UnitState.CLASSIFIED_3,
+                    3: UnitState.MERGED_PROCESSED,  # Для цикла 3 переходим сразу в MERGED_PROCESSED
                 }
                 new_state = new_state_map.get(cycle, UnitState.CLASSIFIED_1)
             
@@ -717,7 +750,7 @@ class Classifier:
             data_paths = get_data_paths()
 
         # Определяем базовую директорию в зависимости от категории
-        if category in ["special", "mixed", "unknown"]:
+        if category in ["special", "mixed", "unknown", "empty"]:
             # Exceptions находится внутри директории с датой
             exceptions_base = data_paths["exceptions"]
             return exceptions_base / f"Exceptions_{cycle}"

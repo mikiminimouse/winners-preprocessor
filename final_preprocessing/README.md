@@ -116,9 +116,17 @@ docprep/
 └── schemas/          # JSON схемы
 ```
 
+## Утилиты
+
+Утилиты для работы с данными находятся в `scripts/`:
+- `cleanup_test_data.py` - очистка тестовых данных с сохранением Input
+
 ## Тестирование
 
 Подробное руководство по тестированию через CLI: см. `docs/TESTING_GUIDE_CLI.md`
+
+Интеграционные тесты находятся в `preprocessing/tests/integration/`:
+- `test_final_preprocessing_pipeline.py` - полный pipeline тест
 
 ### Быстрый старт тестирования
 
@@ -144,11 +152,17 @@ docprep stats show 2025-12-20 --detailed
 
 ## Документация
 
-- **Архитектура:** `docs/ARCHITECTURE.md`
-- **Классификация и статистика:** `docs/CLASSIFICATION_AND_STATISTICS.md`
-- **Руководство по статистике:** `docs/STATISTICS_GUIDE.md`
-- **Руководство по тестированию CLI:** `docs/TESTING_GUIDE_CLI.md`
-- **Лог разработки:** `docs/DEVELOPMENT_LOG.md`
+Полная документация находится в директории `docs/`:
+
+- **[INDEX.md](docs/INDEX.md)** - Индекс всей документации
+- **[MEMORY_BANK.md](docs/MEMORY_BANK.md)** - Memory bank структура документации
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Архитектура системы
+- **[SYSTEM_COMPONENTS.md](docs/SYSTEM_COMPONENTS.md)** - Компоненты системы
+- **[TESTING_GUIDE_CLI.md](docs/TESTING_GUIDE_CLI.md)** - Руководство по тестированию
+- **[STATISTICS_GUIDE.md](docs/STATISTICS_GUIDE.md)** - Руководство по статистике
+- **[CHANGELOG.md](docs/CHANGELOG.md)** - История изменений
+
+Для быстрого старта см. [QUICK_START_TESTING.md](docs/QUICK_START_TESTING.md)
 
 ## Требования
 

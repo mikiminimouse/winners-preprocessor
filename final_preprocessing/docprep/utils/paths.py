@@ -66,9 +66,10 @@ def get_unit_files(unit_path: Path) -> List[Path]:
     """
     Получает список всех файлов UNIT.
 
-    Ищет файлы в:
-    1. unit_path/files/ (если существует)
-    2. unit_path/ (файлы в корне UNIT, исключая manifest.json и audit.log.jsonl)
+    Ищет файлы рекурсивно во всех поддиректориях UNIT:
+    1. unit_path/files/ (если существует) - рекурсивно
+    2. unit_path/ (все поддиректории) - рекурсивно
+    3. Исключает служебные файлы: manifest.json, audit.log.jsonl, metadata.json
 
     Args:
         unit_path: Путь к директории UNIT
@@ -81,19 +82,28 @@ def get_unit_files(unit_path: Path) -> List[Path]:
 
     files: List[Path] = []
     excluded_files = {"manifest.json", "audit.log.jsonl", "metadata.json"}
+    excluded_dirs = {".git", "__pycache__", ".pytest_cache"}
 
-    # Ищем файлы в поддиректории files/
-    files_dir = unit_path / "files"
-    if files_dir.exists() and files_dir.is_dir():
-        files.extend(f for f in files_dir.iterdir() if f.is_file())
-
-    # Также ищем файлы в корне UNIT (если нет поддиректории files)
-    if not files:
-        files.extend(
-            f
-            for f in unit_path.iterdir()
-            if f.is_file() and f.name not in excluded_files
-        )
+    # Рекурсивный поиск всех файлов в UNIT директории
+    # Используем rglob для поиска во всех поддиректориях
+    for file_path in unit_path.rglob("*"):
+        # Пропускаем директории
+        if not file_path.is_file():
+            continue
+        
+        # Пропускаем служебные файлы
+        if file_path.name in excluded_files:
+            continue
+        
+        # Пропускаем файлы в исключенных директориях
+        if any(excluded_dir in file_path.parts for excluded_dir in excluded_dirs):
+            continue
+        
+        # Пропускаем скрытые файлы и временные файлы
+        if file_path.name.startswith(".") or file_path.name.startswith("~"):
+            continue
+        
+        files.append(file_path)
 
     return sorted(files)
 

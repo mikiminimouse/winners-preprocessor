@@ -325,20 +325,36 @@ def detect_file_type(file_path: Path) -> Dict[str, Any]:
         if result.get("is_archive") and extension in [".doc", ".docx", ".xls", ".xlsx"]:
             result["is_fake_doc"] = True
             result["detection_details"]["fake_doc_reason"] = f"{result.get('detected_type', 'archive')} with document extension"
-    # Проверка Excel с OLE2
-        elif header.startswith(b"\xd0\xcf\x11\xe0"):
+    # Проверка OLE2 (старые Office форматы) - ПРИОРИТЕТ расширению файла
+    # Сначала проверяем расширение, чтобы правильно определить тип
+    if header.startswith(b"\xd0\xcf\x11\xe0"):
+        # Если расширение .doc или .docx - это Word документ
+        if extension in [".doc", ".docx"] or mime_type.startswith("application/msword"):
+            result["detected_type"] = "doc"
+            result["requires_conversion"] = True
+            result["detection_details"]["ole2_signature"] = True
+            result["detection_details"]["real_doc"] = True
+            true_type = "doc"
+        # Если расширение .xls или .xlsx - это Excel
+        elif extension in [".xls", ".xlsx"] or mime_type.startswith("application/vnd.ms-excel"):
             excel_result = _detect_excel_with_ole2(file_path, sources["mime_type"], extension, header)
             result.update(excel_result)
             if excel_result.get("detected_type") != "unknown":
                 true_type = excel_result.get("detected_type")
                 result["detected_type"] = true_type
-    # Проверка OLE2 (старые Office форматы)
-    elif header.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
-        result["detected_type"] = "doc"
-        result["requires_conversion"] = True
-        result["detection_details"]["ole2_signature"] = True
-        result["detection_details"]["real_doc"] = True
-        true_type = "doc"
+        # Если расширение .ppt или .pptx - это PowerPoint
+        elif extension in [".ppt", ".pptx"] or mime_type.startswith("application/vnd.ms-powerpoint"):
+            result["detected_type"] = "ppt"
+            result["requires_conversion"] = True
+            result["detection_details"]["ole2_signature"] = True
+            true_type = "ppt"
+        # Если расширение не определено, но есть специфичная сигнатура doc
+        elif header.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+            result["detected_type"] = "doc"
+            result["requires_conversion"] = True
+            result["detection_details"]["ole2_signature"] = True
+            result["detection_details"]["real_doc"] = True
+            true_type = "doc"
     else:
         # Используем true_type из Decision Engine
         if true_type:
@@ -561,6 +577,9 @@ def _detect_excel_with_ole2(
 ) -> Dict[str, Any]:
     """
     Детекция Excel файлов с проверкой OLE2 сигнатуры.
+    
+    ВАЖНО: Эта функция вызывается только для файлов с расширением .xls/.xlsx
+    или с MIME типом Excel, чтобы избежать ложных срабатываний для .doc файлов.
     """
     result: Dict[str, Any] = {
         "detected_type": "unknown",
@@ -568,8 +587,17 @@ def _detect_excel_with_ole2(
         "detection_details": {},
     }
 
+    # Дополнительная проверка: если расширение .doc - это не Excel
+    if extension in [".doc", ".docx"]:
+        result["detected_type"] = "unknown"
+        return result
+
     # Проверка OLE2 signature для старых xls
     if header.startswith(b"\xd0\xcf\x11\xe0"):
+        # Дополнительная проверка: если MIME указывает на Word - это не Excel
+        if mime_type.startswith("application/msword"):
+            result["detected_type"] = "unknown"
+            return result
         result["detected_type"] = "xls"
         result["requires_conversion"] = True
         result["detection_details"]["excel_type"] = "xls"

@@ -167,7 +167,7 @@ def init_directory_structure(base_dir: Optional[Path] = None, date: Optional[str
 
         # Exceptions/Exceptions_N структура (отдельная директория, аналогично Merge)
         exceptions_dir = exceptions_base / f"Exceptions_{cycle}"
-        for subdir in ["Special", "Mixed", "Ambiguous"]:
+        for subdir in ["Special", "Mixed", "Ambiguous", "Empty"]:
             (exceptions_dir / subdir).mkdir(parents=True, exist_ok=True)
 
         # Merge_N структура (Merge_1, Merge_2, Merge_3 содержат Converted, Extracted, Normalized)
@@ -182,10 +182,11 @@ def init_directory_structure(base_dir: Optional[Path] = None, date: Optional[str
         ext_dir = ready_base / ext
         ext_dir.mkdir(parents=True, exist_ok=True)
 
-        # Для PDF дополнительно создаем scan/ и text/
+        # Для PDF дополнительно создаем scan/, text/ и mixed/
         if ext == "pdf":
             (ext_dir / "scan").mkdir(parents=True, exist_ok=True)
             (ext_dir / "text").mkdir(parents=True, exist_ok=True)
+            (ext_dir / "mixed").mkdir(parents=True, exist_ok=True)
 
 
 def get_data_paths(date: Optional[str] = None) -> Dict[str, Path]:
