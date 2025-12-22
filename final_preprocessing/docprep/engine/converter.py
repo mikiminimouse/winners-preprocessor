@@ -384,10 +384,16 @@ class Converter:
                         # Если не нашли с правильным расширением, берем первый
                         output_path = output_dir_files[0]
                 else:
-                    raise OperationError(
-                        f"Converted file not found: {output_path}. LibreOffice stdout: {result.stdout[:200] if result.stdout else 'empty'}",
-                        operation="convert",
-                    )
+                    # Дополнительная проверка - ищем любой файл с целевым расширением
+                    all_target_files = list(output_dir.glob(f"*.{target_format}"))
+                    if all_target_files:
+                        # Берем первый найденный файл с целевым расширением
+                        output_path = all_target_files[0]
+                    else:
+                        raise OperationError(
+                            f"Converted file not found: {output_path}. LibreOffice stdout: {result.stdout[:200] if result.stdout else 'empty'}",
+                            operation="convert",
+                        )
 
             # Удаляем исходный файл после успешной конвертации
             if file_path.exists() and output_path.exists():
