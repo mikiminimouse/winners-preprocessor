@@ -14,7 +14,9 @@ from typing import Dict, Optional, List
 # ============================================================================
 
 # Базовая директория Data (может быть переопределена через env)
-DATA_BASE_DIR = Path(os.environ.get("DATA_BASE_DIR", "./Data"))
+# Используем абсолютный путь относительно проекта для избежания проблем с относительными путями
+_default_data_dir = Path(__file__).parent.parent.parent / "Data"
+DATA_BASE_DIR = Path(os.environ.get("DATA_BASE_DIR", str(_default_data_dir.resolve())))
 
 # Базовые директории относительно DATA_BASE_DIR
 INPUT_DIR = DATA_BASE_DIR / "Input"

@@ -79,13 +79,55 @@ class DoclingAdapter:
         Returns:
             MetadataNode словарь
         """
+        processing = manifest.get("processing", {})
+        files = manifest.get("files", [])
+        
+        # Извлекаем route из processing
+        route = processing.get("route")
+        
+        # Извлекаем needs_ocr из файлов (для PDF)
+        needs_ocr = None
+        file_type_analysis = {}
+        transformation_history = []
+        
+        for file_info in files:
+            # Собираем needs_ocr для PDF файлов
+            detected_type = file_info.get("detected_type", "").lower()
+            if detected_type == "pdf":
+                file_needs_ocr = file_info.get("needs_ocr")
+                if file_needs_ocr is not None:
+                    needs_ocr = file_needs_ocr
+            
+            # Собираем file_type_analysis
+            file_type_analysis[file_info.get("current_name", "")] = {
+                "detected_type": detected_type,
+                "mime_detected": file_info.get("mime_detected"),
+                "needs_ocr": file_info.get("needs_ocr"),
+                "pages_or_parts": file_info.get("pages_or_parts", 1),
+            }
+            
+            # Собираем transformation history
+            transformations = file_info.get("transformations", [])
+            for trans in transformations:
+                transformation_history.append({
+                    "file": file_info.get("current_name", ""),
+                    "type": trans.get("type"),
+                    "details": trans.get("details", {}),
+                })
+        
         return {
             "type": "MetadataNode",
             "unit_id": manifest.get("unit_id"),
             "protocol_id": manifest.get("protocol_id"),
             "protocol_date": manifest.get("protocol_date"),
             "unit_semantics": manifest.get("unit_semantics", {}),
-            "processing": manifest.get("processing", {}),
+            "processing": {
+                **processing,
+                "route": route,
+                "needs_ocr": needs_ocr,
+            },
+            "file_type_analysis": file_type_analysis,
+            "transformation_history": transformation_history,
             "state_machine": manifest.get("state_machine", {}),
             "created_at": manifest.get("created_at"),
             "updated_at": manifest.get("updated_at"),
@@ -108,19 +150,43 @@ class DoclingAdapter:
         manifest_files = manifest.get("files", [])
 
         for file_path in files:
-            # Ищем информацию о файле в manifest
+            # Ищем информацию о файле в manifest по current_name и original_name
             file_info = None
             for mf in manifest_files:
-                if mf.get("current_name") == file_path.name:
+                current_name = mf.get("current_name", "")
+                original_name = mf.get("original_name", "")
+                if (
+                    current_name == file_path.name
+                    or original_name == file_path.name
+                    or file_path.name in [current_name, original_name]
+                ):
                     file_info = mf
                     break
 
-            # Определяем роль файла
+            # Определяем роль файла на основе transformations
             role = "document"  # По умолчанию документ
             if file_info:
-                # Можно определить роль на основе содержимого или метаданных
                 transformations = file_info.get("transformations", [])
-                if any(t.get("type") == "convert" for t in transformations):
+                # Если файл был конвертирован или нормализован, это основной документ
+                if any(
+                    t.get("type") in ["convert", "normalize", "extract"]
+                    for t in transformations
+                ):
+                    role = "document"
+                # Если файл был извлечен из архива как attachment, это вложение
+                elif any(t.get("type") == "extract" for t in transformations):
+                    # Проверяем детали извлечения
+                    extract_trans = next(
+                        (t for t in transformations if t.get("type") == "extract"), None
+                    )
+                    if extract_trans and extract_trans.get("details", {}).get("role") == "attachment":
+                        role = "attachment"
+                    else:
+                        role = "document"
+                else:
+                    # Для файлов без трансформаций определяем по типу
+                    detected_type = file_info.get("detected_type", "").lower()
+                    if detected_type in ["pdf", "docx", "xlsx", "pptx", "html", "xml"]:
                     role = "document"
                 else:
                     role = "attachment"
@@ -129,8 +195,12 @@ class DoclingAdapter:
                 "type": "FileNode",
                 "path": str(file_path),
                 "name": file_path.name,
+                "original_name": file_info.get("original_name", file_path.name) if file_info else file_path.name,
+                "current_name": file_info.get("current_name", file_path.name) if file_info else file_path.name,
                 "role": role,
                 "mime_type": file_info.get("mime_detected") if file_info else None,
+                "detected_type": file_info.get("detected_type") if file_info else None,
+                "needs_ocr": file_info.get("needs_ocr") if file_info else None,
                 "transformations": file_info.get("transformations", []) if file_info else [],
             }
             file_nodes.append(file_node)
@@ -190,12 +260,16 @@ class DoclingAdapter:
             validation["errors"].append(f"Failed to load manifest: {str(e)}")
             return validation
 
-        # Проверка состояния
+        # Проверка состояния - поддерживаем несколько состояний готовности
         state_machine = manifest.get("state_machine", {})
         current_state = state_machine.get("current_state")
-        if current_state != "READY_FOR_DOCLING":
+        ready_states = ["READY_FOR_DOCLING", "MERGED_DIRECT", "MERGED_PROCESSED"]
+        if current_state not in ready_states:
             validation["ready"] = False
-            validation["errors"].append(f"Unit not ready: current state is {current_state}")
+            validation["errors"].append(
+                f"Unit not ready: current state is {current_state}, "
+                f"expected one of {ready_states}"
+            )
 
         # Проверка наличия файлов
         files_dir = unit_path / "files"

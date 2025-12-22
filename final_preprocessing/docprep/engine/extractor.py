@@ -119,14 +119,15 @@ class Extractor:
                 archive_files.append(file_path)
 
         if not archive_files:
-            logger.info(f"No archives to extract in unit {unit_id}")
+            logger.warning(f"No archives to extract in unit {unit_id} - unit will not be moved to Extracted")
+            # Если нет архивов для извлечения, UNIT не должен перемещаться в Extracted
             return {
                 "unit_id": unit_id,
                 "archives_processed": 0,
                 "files_extracted": 0,
                 "extracted_files": [],
-                "errors": [],
-                "moved_to": str(unit_path),
+                "errors": [{"error": "No archives found that require extraction"}],
+                "moved_to": str(unit_path),  # Остается на месте
             }
 
         extracted_files = []
@@ -156,6 +157,20 @@ class Extractor:
             except Exception as e:
                 errors.append({"file": str(archive_path), "error": str(e)})
                 logger.error(f"Failed to extract {archive_path}: {e}")
+
+        # Если не было успешных извлечений, не перемещаем UNIT
+        if not extracted_files and not dry_run:
+            logger.warning(f"No archives were successfully extracted in unit {unit_id} - unit will not be moved")
+            if manifest:
+                save_manifest(unit_path, manifest)
+            return {
+                "unit_id": unit_id,
+                "archives_processed": len(archive_files),
+                "files_extracted": 0,
+                "extracted_files": [],
+                "errors": errors,
+                "moved_to": str(unit_path),  # Остается на месте
+            }
 
         # Сохраняем обновленный manifest
         if manifest:

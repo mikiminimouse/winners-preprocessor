@@ -432,6 +432,16 @@ def update_unit_state(
     if operation:
         manifest = update_manifest_operation(manifest, operation)
 
+        # Если операция - классификация, сохраняем категорию в processing.classification
+        if operation.get("type") == "classify" and "category" in operation:
+            if "processing" not in manifest:
+                manifest["processing"] = {}
+            if "classification" not in manifest["processing"]:
+                manifest["processing"]["classification"] = {}
+            manifest["processing"]["classification"]["category"] = operation["category"]
+            if "is_mixed" in operation:
+                manifest["processing"]["classification"]["is_mixed"] = operation["is_mixed"]
+
     # Обновляем финальный кластер и причину, если предоставлены
     if final_cluster:
         manifest["processing"]["final_cluster"] = final_cluster

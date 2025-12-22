@@ -10,7 +10,7 @@ from ..engine.classifier import Classifier
 from ..engine.converter import Converter
 from ..engine.extractor import Extractor
 from ..engine.normalizers import NameNormalizer, ExtensionNormalizer
-from ..core.config import get_cycle_paths, get_processing_paths, PROCESSING_DIR, MERGE_DIR
+from ..core.config import get_cycle_paths, get_processing_paths, get_data_paths
 from ..core.unit_processor import process_directory_units
 from ..utils.paths import find_all_units
 
@@ -37,20 +37,27 @@ def cycle_run(
 
     typer.echo(f"🔄 Запуск цикла {cycle_num}")
     
-    # Определяем пути
-    processing_base = PROCESSING_DIR / protocol_date
-    merge_base = MERGE_DIR / protocol_date
+    # Определяем пути с использованием get_data_paths для правильной структуры
+    data_paths = get_data_paths(protocol_date)
+    processing_base = data_paths["processing"]
+    merge_base = data_paths["merge"]
+    exceptions_base = data_paths["exceptions"]
     
-    cycle_paths = get_cycle_paths(cycle_num, processing_base, merge_base, None)
+    cycle_paths = get_cycle_paths(cycle_num, processing_base, merge_base, exceptions_base)
     
     if not input_dir:
-        input_dir = processing_base / "Input" if cycle_num == 1 else cycle_paths["processing"]
+        input_dir = data_paths["input"] if cycle_num == 1 else cycle_paths["processing"]
     
     if not pending_dir:
         pending_dir = cycle_paths["processing"]
     
     if not merge_dir:
         merge_dir = cycle_paths["merge"]
+    
+    # Для merge нужно передавать source_dir из Processing_N (после обработки)
+    # В цикле 1 после обработки UNIT находятся в Processing_1/Convert, Extract, Normalize
+    # Нужно собрать их и переместить в Merge_1/Converted, Extracted, Normalized
+    # Для этого используем pending_dir как source_dir для merge
 
     # 1. Классификация
     typer.echo(f"\n📋 Шаг 1: Классификация")
@@ -76,6 +83,7 @@ def cycle_run(
         substage_normalize_full,
     )
     
+    # Используем правильный processing_base из data_paths
     processing_paths = get_processing_paths(cycle_num, processing_base)
     
     # Обработка Convert
@@ -123,20 +131,39 @@ def cycle_run(
         except Exception as e:
             typer.echo(f"  ⚠️  Ошибка нормализации: {e}", err=True)
 
-    # 3. Merge
-    typer.echo(f"\n🔀 Шаг 3: Merge в {merge_dir}")
+    # 3. Merge - перемещаем обработанные UNIT из Processing_N в Merge_N
+    # Для каждого типа обработки (Convert, Extract, Normalize) перемещаем в соответствующий Merge_N
+    typer.echo(f"\n🔀 Шаг 3: Merge в Merge_{cycle_num}")
     from ..cli.stage import stage_merge
-    try:
+    
+    # Используем уже полученные processing_paths из шага 2
+    
+    # Merge для каждого типа обработки
+    merge_categories = {
+        "Convert": "Converted",
+        "Extract": "Extracted", 
+        "Normalize": "Normalized",
+    }
+    
+    for processing_category, merge_category in merge_categories.items():
+        source_processing_dir = processing_paths[processing_category]
+        if source_processing_dir.exists():
+            units = find_all_units(source_processing_dir)
+            if units:
+                typer.echo(f"  🔀 Merge {processing_category} -> {merge_category}")
+                try:
+                    # Определяем целевую директорию для merge
+                    target_merge_dir = cycle_paths["merge"] / merge_category
         stage_merge(
             cycle=cycle_num,
-            source_dir=pending_dir,
-            target_dir=merge_dir,
+                        source_dir=source_processing_dir,
+                        target_dir=target_merge_dir,
             protocol_date=protocol_date,
             verbose=verbose,
             dry_run=dry_run,
         )
     except Exception as e:
-        typer.echo(f"❌ Ошибка merge: {e}", err=True)
+                    typer.echo(f"  ⚠️  Ошибка merge {processing_category}: {e}", err=True)
         if dry_run:
             raise
 

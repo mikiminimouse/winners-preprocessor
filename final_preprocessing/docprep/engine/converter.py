@@ -118,14 +118,16 @@ class Converter:
                 files_to_convert.append((file_path, source_format, target_format))
 
         if not files_to_convert:
-            logger.info(f"No files to convert in unit {unit_id}")
+            logger.warning(f"No files to convert in unit {unit_id} - unit will not be moved to Converted")
+            # Если нет файлов для конвертации, UNIT не должен перемещаться в Converted
+            # Возвращаем результат без перемещения
             return {
                 "unit_id": unit_id,
                 "files_converted": 0,
                 "files_failed": 0,
                 "converted_files": [],
-                "errors": [],
-                "moved_to": str(unit_path),
+                "errors": [{"error": "No files found that require conversion"}],
+                "moved_to": str(unit_path),  # Остается на месте
             }
 
         converted_files = []
@@ -134,7 +136,20 @@ class Converter:
 
         for file_path, source_format, target_format in files_to_convert:
             try:
+                if dry_run:
+                    # В dry_run режиме только логируем
+                    logger.info(f"[DRY RUN] Would convert {file_path.name} from {source_format} to {target_format}")
+                    converted_files.append({
+                        "original_file": str(file_path),
+                        "output_path": str(file_path.parent / (file_path.stem + "." + target_format)),
+                        "source_format": source_format,
+                        "target_format": target_format,
+                        "success": True,
+                    })
+                    target_format_used = target_format
+                else:
                 result = self._convert_file(file_path, source_format, target_format, engine)
+                    if result.get("success"):
                 converted_files.append(result)
                 target_format_used = target_format  # Используем последний целевой формат
 
@@ -168,9 +183,25 @@ class Converter:
                                 "cycle": current_cycle,
                             })
                             break
+                    else:
+                        errors.append({"file": str(file_path), "error": "Conversion failed"})
             except Exception as e:
                 errors.append({"file": str(file_path), "error": str(e)})
                 logger.error(f"Failed to convert {file_path}: {e}")
+
+        # Если не было успешных конвертаций, не перемещаем UNIT
+        if not converted_files and not dry_run:
+            logger.warning(f"No files were successfully converted in unit {unit_id} - unit will not be moved")
+            if manifest:
+                save_manifest(unit_path, manifest)
+            return {
+                "unit_id": unit_id,
+                "files_converted": 0,
+                "files_failed": len(errors),
+                "converted_files": [],
+                "errors": errors,
+                "moved_to": str(unit_path),  # Остается на месте
+            }
 
         # Сохраняем обновленный manifest
         if manifest:

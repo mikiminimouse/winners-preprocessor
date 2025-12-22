@@ -10,7 +10,7 @@ from ..engine.classifier import Classifier
 from ..engine.converter import Converter
 from ..engine.extractor import Extractor
 from ..engine.merger import Merger
-from ..core.config import get_cycle_paths, init_directory_structure
+from ..core.config import get_cycle_paths, init_directory_structure, get_data_paths
 
 app = typer.Typer(name="pipeline", help="Полный прогон preprocessing")
 
@@ -37,15 +37,6 @@ def pipeline_run(
     if dry_run:
         typer.echo("🔍 РЕЖИМ DRY RUN - изменения не будут применены")
 
-    # Инициализируем структуру директорий
-    processing_dir = input_dir.parent / "Processing"
-    init_directory_structure(processing_dir)
-
-    classifier_engine = Classifier()
-    converter_engine = Converter()
-    extractor_engine = Extractor()
-    merger_engine = Merger()
-
     # Определяем дату протокола из input_dir или используем текущую
     protocol_date = datetime.now().strftime("%Y-%m-%d")
     if "/" in str(input_dir) or "\\" in str(input_dir):
@@ -57,6 +48,14 @@ def pipeline_run(
                 break
 
     typer.echo(f"📅 Дата протокола: {protocol_date}")
+
+    # Инициализируем структуру директорий с правильной датой
+    init_directory_structure(date=protocol_date)
+
+    classifier_engine = Classifier()
+    converter_engine = Converter()
+    extractor_engine = Extractor()
+    merger_engine = Merger()
 
     # Запускаем циклы
     for cycle_num in range(1, max_cycles + 1):
@@ -90,11 +89,30 @@ def pipeline_run(
     if verbose:
         typer.echo("\n=== Финальный merge в Ready2Docling ===")
 
+    # Получаем правильные пути для merge директорий
+    data_paths = get_data_paths(protocol_date)
     merge_dirs = []
+    
+    # Добавляем Merge_0/Direct для direct файлов из цикла 1
+    merge_0_direct = data_paths["merge"] / "Merge_0" / "Direct"
+    if merge_0_direct.exists():
+        merge_dirs.append(data_paths["merge"] / "Merge_0")
+    
+    # Добавляем все Merge_N (1, 2, 3)
     for cycle_num in range(1, max_cycles + 1):
-        cycle_paths = get_cycle_paths(cycle_num, processing_dir)
+        cycle_paths = get_cycle_paths(
+            cycle_num,
+            data_paths["processing"],
+            data_paths["merge"],
+            data_paths["exceptions"]
+        )
         merge_dirs.append(cycle_paths["merge"])
 
     result = merger_engine.collect_units(merge_dirs, output_dir)
-    typer.echo(f"Обработано UNIT: {result['units_processed']}")
+    typer.echo(f"✅ Обработано UNIT: {result['units_processed']}")
+    if result.get("errors"):
+        typer.echo(f"⚠️  Ошибок: {len(result['errors'])}", err=True)
+        if verbose:
+            for error in result["errors"][:10]:  # Показываем первые 10 ошибок
+                typer.echo(f"  ❌ {error.get('unit_id', 'unknown')}: {error.get('error', 'unknown error')}", err=True)
 

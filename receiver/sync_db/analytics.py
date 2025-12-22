@@ -286,44 +286,21 @@ class SyncAnalytics:
             if not records:
                 return {}
             
-            # Group by date
-            daily_stats = defaultdict(lambda: {
-                "scanned": 0,
-                "inserted": 0,
-                "skipped": 0,
-                "errors": 0,
-                "duration": 0,
-                "count": 0
-            })
+            # Используем функцию агрегации из metrics_aggregator
+            from receiver.webui.utils.metrics_aggregator import aggregate_by_days_simple
             
-            for record in records:
-                date = record.get("date", "unknown")
-                daily_stats[date]["scanned"] += record.get("total_scanned", 0)
-                daily_stats[date]["inserted"] += record.get("total_inserted", 0)
-                daily_stats[date]["skipped"] += record.get("total_skipped", 0)
-                daily_stats[date]["errors"] += record.get("total_errors", 0)
-                daily_stats[date]["duration"] += record.get("duration_seconds", 0)
-                daily_stats[date]["count"] += 1
+            # Агрегируем данные по дням
+            daily_averages = aggregate_by_days_simple(records, days=None)  # Фильтрация уже сделана в get_historical_sync_data
             
-            # Calculate averages
+            # Формируем результат в том же формате, что и раньше
             trends = {
-                "daily_averages": {},
+                "daily_averages": daily_averages,
                 "total_records": len(records),
                 "date_range": {
                     "start": min(records, key=lambda x: x.get("created_at", datetime.min)).get("created_at"),
                     "end": max(records, key=lambda x: x.get("created_at", datetime.min)).get("created_at")
                 }
             }
-            
-            for date, stats in daily_stats.items():
-                trends["daily_averages"][date] = {
-                    "avg_scanned": stats["scanned"] / stats["count"] if stats["count"] > 0 else 0,
-                    "avg_inserted": stats["inserted"] / stats["count"] if stats["count"] > 0 else 0,
-                    "avg_skipped": stats["skipped"] / stats["count"] if stats["count"] > 0 else 0,
-                    "avg_errors": stats["errors"] / stats["count"] if stats["count"] > 0 else 0,
-                    "avg_duration": stats["duration"] / stats["count"] if stats["count"] > 0 else 0,
-                    "sessions": stats["count"]
-                }
             
             return trends
             

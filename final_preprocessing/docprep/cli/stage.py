@@ -10,6 +10,7 @@ from ..engine.classifier import Classifier
 from ..engine.merger import Merger
 from ..core.unit_processor import process_directory_units
 from ..core.config import get_processing_paths, get_cycle_paths, PROCESSING_DIR, MERGE_DIR
+from ..core.exceptions import StateTransitionError
 from ..utils.paths import find_all_units
 
 app = typer.Typer(name="stage", help="Этап внутри цикла")
@@ -167,8 +168,13 @@ def stage_merge(
     if not protocol_date:
         protocol_date = datetime.now().strftime("%Y-%m-%d")
 
-    # Определяем целевую директорию Merge
-    merge_base = MERGE_DIR / protocol_date if protocol_date else MERGE_DIR
+    # Определяем целевую директорию Merge с использованием get_data_paths
+    from ..core.config import get_data_paths
+    if protocol_date:
+        data_paths = get_data_paths(protocol_date)
+        merge_base = data_paths["merge"]
+    else:
+        merge_base = MERGE_DIR
     cycle_paths = get_cycle_paths(cycle, None, merge_base, None)
     
     # Определяем категорию Merge на основе исходной директории
@@ -225,10 +231,40 @@ def stage_merge(
             
             # Пытаемся определить категорию из manifest для точности
             actual_category = merge_category
+            manifest = None
             try:
                 manifest = load_manifest(unit_path)
                 operations = manifest.get("processing", {}).get("operations", [])
-                # Ищем последнюю операцию
+                
+                # ВАЖНО: Проверяем, что операция действительно выполнена
+                # Для Convert - проверяем наличие операции convert с успешным результатом
+                if merge_category == "Converted":
+                    has_convert = any(
+                        op.get("type") == "convert" and op.get("to") is not None
+                        for op in operations
+                    )
+                    if not has_convert:
+                        # UNIT не был конвертирован - пропускаем merge
+                        typer.echo(f"  ⚠️  {unit_path.name}: Не был конвертирован, пропускаем merge", err=True)
+                        continue
+                
+                # Для Extract - проверяем наличие операции extract
+                elif merge_category == "Extracted":
+                    has_extract = any(op.get("type") == "extract" for op in operations)
+                    if not has_extract:
+                        # UNIT не был извлечен - пропускаем merge
+                        typer.echo(f"  ⚠️  {unit_path.name}: Не был извлечен, пропускаем merge", err=True)
+                        continue
+                
+                # Для Normalize - проверяем наличие операции normalize
+                elif merge_category == "Normalized":
+                    has_normalize = any(op.get("type") == "normalize" for op in operations)
+                    if not has_normalize:
+                        # UNIT не был нормализован - пропускаем merge
+                        typer.echo(f"  ⚠️  {unit_path.name}: Не был нормализован, пропускаем merge", err=True)
+                        continue
+                
+                # Ищем последнюю операцию для определения категории
                 for op in reversed(operations):
                     op_type = op.get("type")
                     if op_type == "convert":
@@ -240,8 +276,9 @@ def stage_merge(
                     elif op_type == "normalize":
                         actual_category = "Normalized"
                         break
-            except Exception:
-                pass
+            except Exception as e:
+                typer.echo(f"  ⚠️  {unit_path.name}: Ошибка загрузки manifest: {e}", err=True)
+                continue
             
             # Обновляем target_dir если категория изменилась
             if actual_category != merge_category:
@@ -257,13 +294,119 @@ def stage_merge(
                 dry_run=dry_run,
             )
             
-            # Обновляем состояние UNIT
-            # Все обработанные файлы идут в MERGED_PROCESSED
-            # (Direct файлы уже в Merge_0/Direct/ после классификации)
-            merge_state = UnitState.MERGED_PROCESSED
-            
+            # Определяем правильное состояние для merge на основе текущего состояния UNIT
+            # Если UNIT находится в Processing_N, значит он уже был обработан
+            # и должен быть в состоянии CLASSIFIED_2 или CLASSIFIED_3
             if not dry_run:
                 from ..core.unit_processor import update_unit_state
+                from ..core.state_machine import UnitStateMachine, UnitState
+                
+                manifest_path = target_unit_path / "manifest.json"
+                merge_state = None
+                
+                if manifest_path.exists():
+                    try:
+                        state_machine = UnitStateMachine(target_unit_path.name, manifest_path)
+                        current_state = state_machine.get_current_state()
+                        
+                        # Определяем целевое состояние на основе текущего состояния
+                        # UNIT в Processing_N после обработки должны перейти в MERGED_PROCESSED
+                        if current_state == UnitState.CLASSIFIED_2:
+                            # UNIT из цикла 2 после обработки переходит в MERGED_PROCESSED
+                            merge_state = UnitState.MERGED_PROCESSED
+                        elif current_state == UnitState.CLASSIFIED_3:
+                            # UNIT из цикла 3 переходит в MERGED_PROCESSED
+                            merge_state = UnitState.MERGED_PROCESSED
+                        elif current_state == UnitState.MERGED_PROCESSED:
+                            # UNIT уже в MERGED_PROCESSED - это нормально, пропускаем обновление
+                            merge_state = None
+                        elif current_state == UnitState.PENDING_CONVERT:
+                            # UNIT в PENDING_CONVERT - сначала переводим в CLASSIFIED_2
+                            if state_machine.can_transition_to(UnitState.CLASSIFIED_2):
+                                update_unit_state(
+                                    unit_path=target_unit_path,
+                                    new_state=UnitState.CLASSIFIED_2,
+                                    cycle=cycle,
+                                    operation={
+                                        "type": "merge",
+                                        "category": actual_category,
+                                        "cycle": cycle,
+                                        "transition": "PENDING_CONVERT -> CLASSIFIED_2",
+                                    },
+                                )
+                                # Теперь переходим в MERGED_PROCESSED
+                                state_machine = UnitStateMachine(target_unit_path.name, manifest_path)
+                                merge_state = UnitState.MERGED_PROCESSED
+                            else:
+                                typer.echo(f"  ⚠️  {unit_path.name}: Cannot transition from PENDING_CONVERT to CLASSIFIED_2", err=True)
+                                continue
+                        elif current_state == UnitState.PENDING_EXTRACT:
+                            # UNIT в PENDING_EXTRACT - сначала переводим в CLASSIFIED_2
+                            if state_machine.can_transition_to(UnitState.CLASSIFIED_2):
+                                update_unit_state(
+                                    unit_path=target_unit_path,
+                                    new_state=UnitState.CLASSIFIED_2,
+                                    cycle=cycle,
+                                    operation={
+                                        "type": "merge",
+                                        "category": actual_category,
+                                        "cycle": cycle,
+                                        "transition": "PENDING_EXTRACT -> CLASSIFIED_2",
+                                    },
+                                )
+                                # Теперь переходим в MERGED_PROCESSED
+                                state_machine = UnitStateMachine(target_unit_path.name, manifest_path)
+                                merge_state = UnitState.MERGED_PROCESSED
+                            else:
+                                typer.echo(f"  ⚠️  {unit_path.name}: Cannot transition from PENDING_EXTRACT to CLASSIFIED_2", err=True)
+                                continue
+                        elif current_state == UnitState.PENDING_NORMALIZE:
+                            # UNIT в PENDING_NORMALIZE - сначала переводим в CLASSIFIED_2
+                            if state_machine.can_transition_to(UnitState.CLASSIFIED_2):
+                                update_unit_state(
+                                    unit_path=target_unit_path,
+                                    new_state=UnitState.CLASSIFIED_2,
+                                    cycle=cycle,
+                                    operation={
+                                        "type": "merge",
+                                        "category": actual_category,
+                                        "cycle": cycle,
+                                        "transition": "PENDING_NORMALIZE -> CLASSIFIED_2",
+                                    },
+                                )
+                                # Теперь переходим в MERGED_PROCESSED
+                                state_machine = UnitStateMachine(target_unit_path.name, manifest_path)
+                                merge_state = UnitState.MERGED_PROCESSED
+                            else:
+                                typer.echo(f"  ⚠️  {unit_path.name}: Cannot transition from PENDING_NORMALIZE to CLASSIFIED_2", err=True)
+                                continue
+                        elif current_state == UnitState.CLASSIFIED_1:
+                            # UNIT в CLASSIFIED_1 не должен попадать в merge из Processing_N
+                            # Это ошибка - пропускаем
+                            typer.echo(f"  ⚠️  {unit_path.name}: UNIT в CLASSIFIED_1 не должен быть в Processing_N, пропускаем", err=True)
+                            continue
+                        else:
+                            # Для других состояний пытаемся перейти в MERGED_PROCESSED, если разрешено
+                            if state_machine.can_transition_to(UnitState.MERGED_PROCESSED):
+                                merge_state = UnitState.MERGED_PROCESSED
+                            else:
+                                typer.echo(f"  ⚠️  {unit_path.name}: UNIT в состоянии {current_state.value} не может перейти в MERGED_PROCESSED, пропускаем", err=True)
+                                continue
+                    except Exception as e:
+                        logger.warning(f"Failed to check state for {unit_path.name}: {e}")
+                        typer.echo(f"  ⚠️  {unit_path.name}: Ошибка проверки состояния: {e}", err=True)
+                        continue
+                else:
+                    # Нет manifest - пропускаем
+                    typer.echo(f"  ⚠️  {unit_path.name}: Нет manifest.json, пропускаем", err=True)
+                    continue
+                
+                # Обновляем состояние на merge_state
+                if merge_state:
+                    try:
+                        # Перезагружаем state machine после возможных изменений
+                        state_machine = UnitStateMachine(target_unit_path.name, manifest_path)
+                        if state_machine.can_transition_to(merge_state):
                 update_unit_state(
                     unit_path=target_unit_path,
                     new_state=merge_state,
@@ -274,6 +417,18 @@ def stage_merge(
                         "cycle": cycle,
                     },
                 )
+                        else:
+                            typer.echo(f"  ⚠️  {unit_path.name}: Cannot transition to {merge_state.value}, пропускаем", err=True)
+                            continue
+                    except StateTransitionError as e:
+                        # Если переход не разрешен, логируем и пропускаем
+                        logger.warning(f"Failed to update state for {unit_path.name}: {e}")
+                        typer.echo(f"  ⚠️  {unit_path.name}: {e}", err=True)
+                        continue
+                    except Exception as e:
+                        logger.warning(f"Failed to update state for {unit_path.name}: {e}")
+                        typer.echo(f"  ⚠️  {unit_path.name}: Ошибка обновления состояния: {e}", err=True)
+                        continue
             
             moved_count += 1
             if verbose:

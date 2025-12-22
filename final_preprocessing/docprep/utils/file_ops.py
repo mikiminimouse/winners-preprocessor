@@ -328,26 +328,35 @@ def detect_file_type(file_path: Path) -> Dict[str, Any]:
     # Проверка OLE2 (старые Office форматы) - ПРИОРИТЕТ расширению файла
     # Сначала проверяем расширение, чтобы правильно определить тип
     if header.startswith(b"\xd0\xcf\x11\xe0"):
+        # Используем sources["mime_type"] вместо неопределенной переменной mime_type
+        mime_type_val = sources["mime_type"]
         # Если расширение .doc или .docx - это Word документ
-        if extension in [".doc", ".docx"] or mime_type.startswith("application/msword"):
+        if extension in [".doc", ".docx"] or mime_type_val.startswith("application/msword"):
             result["detected_type"] = "doc"
             result["requires_conversion"] = True
             result["detection_details"]["ole2_signature"] = True
             result["detection_details"]["real_doc"] = True
             true_type = "doc"
+            # ВАЖНО: Переопределяем classification для .doc файлов - это convert, а не normalize
+            # Decision Engine мог вернуть "normalize" для ole2, но .doc файлы должны быть convert
+            result["classification"] = "direct"  # direct означает, что файл готов к обработке (конвертации)
         # Если расширение .xls или .xlsx - это Excel
-        elif extension in [".xls", ".xlsx"] or mime_type.startswith("application/vnd.ms-excel"):
+        elif extension in [".xls", ".xlsx"] or mime_type_val.startswith("application/vnd.ms-excel"):
             excel_result = _detect_excel_with_ole2(file_path, sources["mime_type"], extension, header)
             result.update(excel_result)
             if excel_result.get("detected_type") != "unknown":
                 true_type = excel_result.get("detected_type")
                 result["detected_type"] = true_type
+                # ВАЖНО: Переопределяем classification для .xls файлов
+                result["classification"] = "direct"
         # Если расширение .ppt или .pptx - это PowerPoint
-        elif extension in [".ppt", ".pptx"] or mime_type.startswith("application/vnd.ms-powerpoint"):
+        elif extension in [".ppt", ".pptx"] or mime_type_val.startswith("application/vnd.ms-powerpoint"):
             result["detected_type"] = "ppt"
             result["requires_conversion"] = True
             result["detection_details"]["ole2_signature"] = True
             true_type = "ppt"
+            # ВАЖНО: Переопределяем classification для .ppt файлов
+            result["classification"] = "direct"
         # Если расширение не определено, но есть специфичная сигнатура doc
         elif header.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
             result["detected_type"] = "doc"
@@ -355,6 +364,8 @@ def detect_file_type(file_path: Path) -> Dict[str, Any]:
             result["detection_details"]["ole2_signature"] = True
             result["detection_details"]["real_doc"] = True
             true_type = "doc"
+            # ВАЖНО: Переопределяем classification для .doc файлов
+            result["classification"] = "direct"
     else:
         # Используем true_type из Decision Engine
         if true_type:
@@ -389,12 +400,21 @@ def detect_file_type(file_path: Path) -> Dict[str, Any]:
     if detected_type == "unknown":
         if mime_type.startswith("application/msword"):
             detected_type = "doc"
-        result["detected_type"] = "doc"
-        result["requires_conversion"] = True
+            result["detected_type"] = "doc"
+            result["requires_conversion"] = True
+        elif mime_type.startswith("application/vnd.ms-excel"):
+            detected_type = "xls"
+            result["detected_type"] = "xls"
+            result["requires_conversion"] = True
+        elif mime_type.startswith("application/vnd.ms-powerpoint"):
+            detected_type = "ppt"
+            result["detected_type"] = "ppt"
+            result["requires_conversion"] = True
     elif mime_type.startswith("application/vnd.ms-powerpoint"):
-        detected_type = "ppt"
-        result["detected_type"] = "ppt"
-        result["requires_conversion"] = True
+        if detected_type != "ppt":
+            detected_type = "ppt"
+            result["detected_type"] = "ppt"
+            result["requires_conversion"] = True
 
     # Проверка изображений
     if mime_type.startswith("image/"):

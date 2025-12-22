@@ -1,0 +1,4 @@
+docling>=2.60.0
+docling-core>=2.50.0
+pymongo>=4.0.0
+

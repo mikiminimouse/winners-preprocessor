@@ -14,7 +14,7 @@ from . import stage
 from . import substage
 from . import classifier
 from . import merge
-from . import inspect
+from . import inspect_cmd as inspect
 from . import utils
 from . import stats
 

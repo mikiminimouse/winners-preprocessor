@@ -81,7 +81,14 @@ def get_unit_files(unit_path: Path) -> List[Path]:
         return []
 
     files: List[Path] = []
-    excluded_files = {"manifest.json", "audit.log.jsonl", "metadata.json"}
+    # Служебные файлы, которые не должны учитываться при классификации
+    excluded_files = {
+        "manifest.json",
+        "audit.log.jsonl",
+        "metadata.json",
+        "raw_url_map.json",  # Служебный файл с URL маппингом
+        "unit.meta.json",    # Служебный файл с метаданными UNIT
+    }
     excluded_dirs = {".git", "__pycache__", ".pytest_cache"}
 
     # Рекурсивный поиск всех файлов в UNIT директории

@@ -351,6 +351,7 @@ class Classifier:
                 )
                 
                 if not dry_run:
+                    # Сначала переводим в MERGED_PROCESSED, затем в READY_FOR_DOCLING
                     update_unit_state(
                         unit_path=target_dir,
                         new_state=UnitState.MERGED_PROCESSED,
@@ -362,9 +363,21 @@ class Classifier:
                             "file_count": len(files),
                         },
                     )
-                    new_state = UnitState.MERGED_PROCESSED
+                    # Затем переводим в READY_FOR_DOCLING
+                    update_unit_state(
+                        unit_path=target_dir,
+                        new_state=UnitState.READY_FOR_DOCLING,
+                        cycle=cycle,
+                        operation={
+                            "type": "classify",
+                            "category": unit_category,
+                            "ready_for_docling": True,
+                            "file_count": len(files),
+                        },
+                    )
+                    new_state = UnitState.READY_FOR_DOCLING
                 else:
-                    new_state = UnitState.MERGED_PROCESSED
+                    new_state = UnitState.READY_FOR_DOCLING
                 
                 # Логируем операцию
                 self.audit_logger.log_event(
@@ -680,8 +693,20 @@ class Classifier:
             classification["needs_extraction"] = True
             return classification
 
-        # Проверка на необходимость конвертации
+        # ВАЖНО: Проверка на необходимость конвертации ДО использования classification из Decision Engine
+        # Это нужно, чтобы .doc, .xls, .ppt файлы всегда попадали в convert, а не в normalize
         detected_type = detection.get("detected_type")
+        
+        # Проверяем расширение файла для старых Office форматов
+        # Если расширение .doc, .xls, .ppt - это всегда convert, независимо от Decision Engine
+        if extension in [".doc", ".xls", ".ppt", ".rtf"]:
+            # Проверяем, что это действительно старый Office формат
+            if detected_type in self.CONVERTIBLE_TYPES or detection.get("requires_conversion", False):
+                classification["category"] = "convert"
+                classification["needs_conversion"] = True
+                return classification
+        
+        # Проверка на необходимость конвертации по detected_type
         if detected_type in self.CONVERTIBLE_TYPES:
             classification["category"] = "convert"
             classification["needs_conversion"] = True
@@ -690,7 +715,17 @@ class Classifier:
         # Используем classification из Decision Engine
         decision_classification = detection.get("classification")
 
+        # ВАЖНО: Если Decision Engine вернул "normalize" для .doc, .xls, .ppt файлов,
+        # это может быть ошибка - такие файлы должны идти в convert
         if decision_classification == "normalize":
+            # Проверяем расширение - если это старый Office формат, это convert, а не normalize
+            if extension in [".doc", ".xls", ".ppt", ".rtf"]:
+                # Это старый Office формат - должен быть convert
+                classification["category"] = "convert"
+                classification["needs_conversion"] = True
+                return classification
+            
+            # Для других файлов используем normalize
             classification["category"] = "normalize"
             classification["needs_normalization"] = True
             classification["correct_extension"] = detection.get("correct_extension")
