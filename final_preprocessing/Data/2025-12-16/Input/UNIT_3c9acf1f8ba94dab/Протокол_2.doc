@@ -1,0 +1,106 @@
+<html>
+	<head>
+		<meta http-equiv=Content-Type content="text/html; charset=utf-8">
+		
+		<style>
+			body{
+				text-align:left;
+			}
+			.table2{
+				border-collapse:collapse;
+				border:1px solid #000000;
+			}
+			.center td{
+				text-align:center;
+			}
+			body,td,p{
+				font: 12px Arial, sans-serif;
+			}			
+			hr{
+				width:730px;
+				margin:10px 0px 10px 0px;
+			}
+		</style>
+	</head>
+	
+	<body>
+		
+
+    <table cellpadding="5" cellspacing="0" width="730">
+        <tr>
+	<td colspan="4" align="center"><strong>Протокол № 6141-2</strong><br>
+            	проведения торгов в открытом электронном аукционе,<br>      
+	проводимом на электронной торговой площадке https://etpzakaz.ru<br>
+	<br>
+	</td>
+        </tr>
+       </table>
+       
+       <table cellpadding="1" cellspacing="0" class="table1">
+       	<tr>
+       		<td width="200">Дата протокола:</td>
+       		<td width="450"><i>15.12.2025 12:12:00</i></td>
+       	</tr>
+       	<tr>
+       		<td>Место составления протокола:</td>
+       		<td valign="top"><i>г. Казань, ул Тихорецкая, 11</i></td>
+       	</tr>
+       	<tr>
+       		<td>Наименование заказчика:<br><br></td>
+       		<td valign="top"><i>ГУП "Медицинская техника и фармация Татарстана"</i></td>
+       	</tr>
+       	<tr>
+       		<td valign="top">1. Предмет договора:</td>
+       		<td><i>Поставка изделий медицинского назначения</i><br></td>
+       	</tr>
+
+	<tr>
+       		
+		<td>2. № извещения на сайте zakupki.gov.ru:</td>
+       		
+		<td><i>32515427003</i></td>
+       	
+	</tr>
+
+
+       
+
+
+       	<tr>
+       		<td>3. Начальная цена договора:</td>
+       		<td><i>747 100,00 руб.</i></td>
+       	</tr>
+
+       	<tr>
+       		<td>4. Дата и время начала аукциона:</td>
+       		<td><i>15.12.2025 11:50:00</i></td>
+       	</tr>
+       	<tr>
+       		<td>5. Дата и время завершения аукциона:</td>
+       		<td><i>15.12.2025 12:12:00</i></td>
+       	</tr>
+       </table>
+       
+
+
+
+
+
+
+
+       <hr>
+       
+      
+  <table cellpadding="2" cellspacing="0" width="730" ><tr><td width="180">Номер лота:</td><td><i>1</i></td></tr><tr><td>Название лота:<br></td><td valign="top"><i>Поставка изделий медицинского назначения</i></td></tr><tr><td>Начальная цена:</td><td><i>747 100,00 руб.</i></td></tr></table><table cellpadding="2" cellspacing="0" width="730"><tr><td>Предложения по лоту,сделанные участниками торгов:</td></tr></table><table cellpadding="5" class="table2 center" width="700" rules="all"> <tr>  <td width="40"><strong>№</strong></td>  <td width="200"><strong>Код заявки</strong></td>  <td width="260"><strong>Ценовое предложение</strong></td>  <td width="200"><strong>Дата и время</strong></td> </tr><tr> <td>1</td> <td>47395</td> <td>743 364,50 руб.</td> <td>15.12.2025 11:50:38</td></tr><tr> <td>2</td> <td>47400</td> <td>739 629,00 руб.</td> <td>15.12.2025 11:50:53</td></tr><tr> <td>3</td> <td>47395</td> <td>735 893,50 руб.</td> <td>15.12.2025 11:56:12</td></tr><tr> <td>4</td> <td>47400</td> <td>732 158,00 руб.</td> <td>15.12.2025 11:56:39</td></tr><tr> <td>5</td> <td>47395</td> <td>728 422,50 руб.</td> <td>15.12.2025 11:57:39</td></tr><tr> <td>6</td> <td>47400</td> <td>724 687,00 руб.</td> <td>15.12.2025 11:57:59</td></tr><tr> <td>7</td> <td>47395</td> <td>720 951,50 руб.</td> <td>15.12.2025 11:58:16</td></tr><tr> <td>8</td> <td>47400</td> <td>717 216,00 руб.</td> <td>15.12.2025 11:58:55</td></tr><tr> <td>9</td> <td>47395</td> <td>713 480,50 руб.</td> <td>15.12.2025 11:59:09</td></tr><tr> <td>10</td> <td>47400</td> <td>709 745,00 руб.</td> <td>15.12.2025 11:59:35</td></tr><tr> <td>11</td> <td>47395</td> <td>706 009,50 руб.</td> <td>15.12.2025 12:00:35</td></tr><tr> <td>12</td> <td>47400</td> <td>702 274,00 руб.</td> <td>15.12.2025 12:01:22</td></tr> </table><hr>
+
+       
+	   <br>
+       <table cellpadding="5" cellspacing="0" width="730">
+       	<tr>
+       		<td>Настояший протокол подлежит размещению на сайте https://etpzakaz.ru:</td>
+       	</tr>
+       </table>
+		<br>
+	</body>
+	
+</html>

@@ -1,0 +1,168 @@
+<html>
+	<head>
+		<meta http-equiv=Content-Type content="text/html; charset=utf-8">
+		
+		<style>
+			body {
+				text-align:left;			
+			}
+
+			.table1 td {
+				font-size:12px;
+			}
+			.table2 {
+				border-collapse:collapse;
+				border:1px solid #000000;
+			}
+			
+			
+			.small td {
+				font-size:9px;
+				text-align: center;
+				height:30px;
+			}
+			.small2 td {
+				font-size:10px;
+				text-align: center;
+				height:30px;
+			}
+
+			.table3 td {
+				height:40px;
+			}
+			.center td {
+				text-align:center;
+			}
+			body, td, p {
+				font: 12px Arial, sans-serif;
+			}
+			.pril1 td {
+				height:10px;
+			}
+			hr {
+				margin:10px 0px 10px 0px;
+				width:730px;
+			}
+		</style>
+	</head>
+	
+	<body>
+  <table cellpadding="5" cellspacing="0" width="730">
+    <tr>
+      <td colspan="4" align="center">
+        <strong>
+          Протокол № 5549-1
+        </strong><br>
+        рассмотрения первых частей заявок на участие в открытом электронном аукционе,<br>      
+        проводимом на электронной торговой площадке https://etpzakaz.ru<br>
+        <br>
+      </td>
+    </tr>
+  </table>
+       
+  <table cellpadding="1" cellspacing="0" class="table1">
+    <tr>
+      <td width="200">Дата протокола:</td>
+      <td width="450"><i>27.11.2025</i></td>
+    </tr>
+    <tr>
+      <td>Место составления протокола:</td>
+      <td valign="top"><i>г. Казань, ул Тихорецкая, 11</i></td>
+    </tr>
+    <tr>
+      <td>Наименование заказчика:<br><br></td>
+      <td valign="top"><i>ГУП "Медицинская техника и фармация Татарстана"</i></td>
+    </tr>
+    <tr>
+      <td valign="top">1. Предмет закупки:</td>
+      <td><i>Поставка лекарственных средств </i><br></td>
+    </tr>
+    <tr>
+      <td>2. № извещения на сайте zakupki.gov.ru:</td>
+      <td><i>32515384302</i></td>
+    </tr>
+    <tr>
+      <td>3. Начальная цена договора:</td>
+      <td><i>44 658,90 руб.</i></td>
+    </tr>
+    <tr>
+      <td>4. Место поставки товара, оказания услуг, выполнения работ:</td>
+      <td><i>г. Казань, ул Тихорецкая, 11</i></td>
+    </tr>
+    <tr>
+      <td>5. Срок поставки, оказания услуг, выполнения работ:</td>
+      <td><i>Поставка товара осуществляется в сроки, указанные в проекте договора</i></td>
+    </tr>
+    <tr>
+      <td>6. Форма оплаты:</td>
+      <td><i>Безналичный расчет</i></td>
+    </tr>
+    <tr>
+      <td>7. Срок оплаты:</td>
+      <td><i>Не позднее ста двадцати рабочих дней с даты оприходования поставленного товара на аптечном складе</i></td>
+    </tr>
+    <tr>
+      <td>8. Количество поданных заявок на участие:</td>
+      <td><i>0</i></td>
+    </tr>
+    <tr>
+      <td>9. Сведения об участниках закупки, подавших заявки:</td>
+      <td></td>
+    </tr>
+  </table>
+  
+  <table cellpadding="5" cellspacing="0"><tr><td> По данному лоту не было подано ни одной заявки<br></td></tr></table>
+
+    <table cellpadding="1" cellspacing="0" class="table1">
+    <tr>
+      <td>10. Количество отклоненных заявок на участие:</td>
+      <td><i>0</i></td>
+    </tr>
+    <tr>
+      <td>11. Закупка признана несостоявшейся:</td>
+      <td><i>Да</i></td>
+    </tr>
+    <tr>
+      <td>12. Состав комиссии:</td>
+      <td></td>
+    </tr>
+  </table>
+
+  <table cellpadding="1" cellspacing="0" border="1" class="table2 small" width="620"><tr><td><b>Акберов О.З.</b></td><td><b>Шемякина Н.М.</b></td><td><b>Мингазутдинов И.Г.</b></td><td><b>Набиуллина Н.А.</b></td><td><b>Шигабутдинов А.Р.</b></td><td><b>Емельянов Д.В.</b></td><td><b>Ибрагимова А.Р.</b></td></tr><tr><td>Председатель комиссии</td><td>Зам. Председателя комиссии</td><td>Член комиссии</td><td>Член комиссии</td><td>Член комиссии</td><td>Член комиссии</td><td>Секретарь комиссии</td></tr></table><br>
+
+  <table cellpadding="1" cellspacing="0" class="table1">
+    <tr>
+      <td>13. Результаты поименного голосования членов комиссии приведены в Приложении № 1 настоящего протокола</td>
+    </tr>
+    <tr>
+      <td>14. Итоговый результат:</td>
+    </tr>
+  </table>
+
+  <table cellpadding="5" class="table2 center small2" width="630" rules="all"><tbody><tr><td width="60" style="height:15px;"><strong>Номер лота</strong></td><td style="height:15px;"><strong>Результат</strong></td></tr><tr><td width="60" style="height:15px;"><strong>Лот № 1</strong></td><td style="height:15px;">Открытый электронный аукцион по данному лоту признан несостоявшимся в соответствии с подп. 1 п. 10 статьи 37 Положения о закупках товаров, работ, услуг ГУП «Медицинская техника и фармация Татарстана» - не было подано ни одной заявки.</td></tr></tbody></table><br>
+
+  <table cellpadding="1" cellspacing="0" class="table1">
+    <tr>
+      <td>15. Подписи членов комиссии, присутствующих на заседании:</td>
+    </tr>
+  </table>
+       
+  <table cellpadding="5" class="table2 center table3" width="630" rules="all"><tr> <td width="40" style="height:15px;"><strong>№</strong></td> <td width="220" style="height:15px;"><strong>Ф.И.О.</strong></td> <td width="220" style="height:15px;"><strong>Роль</strong></td> <td width="220" style="height:15px;"><strong>Подпись</strong></td></tr><tr> <td>1</td> <td>Акберов О.З.</td> <td>Председатель комиссии</td> <td></td></tr><tr> <td>2</td> <td>Шемякина Н.М.</td> <td>Зам. Председателя комиссии</td> <td></td></tr><tr> <td>3</td> <td>Мингазутдинов И.Г.</td> <td>Член комиссии</td> <td></td></tr><tr> <td>4</td> <td>Набиуллина Н.А.</td> <td>Член комиссии</td> <td></td></tr><tr> <td>5</td> <td>Шигабутдинов А.Р.</td> <td>Член комиссии</td> <td></td></tr><tr> <td>6</td> <td>Емельянов Д.В.</td> <td>Член комиссии</td> <td></td></tr><tr> <td>7</td> <td>Ибрагимова А.Р.</td> <td>Секретарь комиссии</td> <td></td></tr></table>
+
+  <br>
+  <table cellpadding="5" cellspacing="0">
+    <tr>
+      <td width="700" align="right">
+        Приложение № 1<br>
+        к Протоколу № 5549-1<br>
+        рассмотрения первых частей заявок на участие в открытом электронном аукционе,<br>
+        проводимом на электронной торговой площадке https://etpzakaz.ru<br>
+      </td>
+    </tr>
+  </table>
+  <br>
+
+  <table cellpadding="1" cellspacing="0" border="1" class="table2 small pril1" width="620"><tr><td width="50" >код заявки</td><td><b>Акберов О.З.</b></td><td><b>Шемякина Н.М.</b></td><td><b>Мингазутдинов И.Г.</b></td><td><b>Набиуллина Н.А.</b></td><td><b>Шигабутдинов А.Р.</b></td><td><b>Емельянов Д.В.</b></td><td><b>Ибрагимова А.Р.</b></td></tr></table><br>
+
+	</body>
+</html>
