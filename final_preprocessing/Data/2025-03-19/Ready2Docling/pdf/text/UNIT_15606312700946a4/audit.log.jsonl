@@ -1,1 +1,0 @@
-{"timestamp": "2025-12-22T05:06:18.377838Z", "unit_id": "UNIT_15606312700946a4", "event_type": "operation", "operation": "merge", "correlation_id": "f37441f8-7357-4efc-9384-a7e0fa408e04", "details": {"source": "Merge_0", "files_count": 1, "target_dir": "Data/2025-03-19/Ready2Docling/pdf/text/UNIT_15606312700946a4"}, "state_before": "MERGED", "state_after": "READY_FOR_DOCLING"}
