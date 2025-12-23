@@ -118,7 +118,15 @@ class Extractor:
             ]:
                 archive_files.append(file_path)
 
-        if not archive_files:
+        # Проверяем, есть ли уже извлеченные файлы (директории *_extracted)
+        has_extracted_dirs = any(
+            f.is_dir() and "_extracted" in f.name 
+            for f in unit_path.iterdir() 
+            if f.name not in ["manifest.json", "audit.log.jsonl"]
+        )
+        
+        # Если нет архивов для извлечения и нет извлеченных директорий, UNIT не должен перемещаться
+        if not archive_files and not has_extracted_dirs:
             logger.warning(f"No archives to extract in unit {unit_id} - unit will not be moved to Extracted")
             # Если нет архивов для извлечения, UNIT не должен перемещаться в Extracted
             return {
@@ -158,8 +166,15 @@ class Extractor:
                 errors.append({"file": str(archive_path), "error": str(e)})
                 logger.error(f"Failed to extract {archive_path}: {e}")
 
-        # Если не было успешных извлечений, не перемещаем UNIT
-        if not extracted_files and not dry_run:
+        # Проверяем, есть ли уже извлеченные файлы (директории *_extracted)
+        has_extracted_dirs = any(
+            f.is_dir() and "_extracted" in f.name 
+            for f in unit_path.iterdir() 
+            if f.name not in ["manifest.json", "audit.log.jsonl"]
+        )
+        
+        # Если не было успешных извлечений и нет уже извлеченных директорий, не перемещаем UNIT
+        if not extracted_files and not has_extracted_dirs and not dry_run:
             logger.warning(f"No archives were successfully extracted in unit {unit_id} - unit will not be moved")
             if manifest:
                 save_manifest(unit_path, manifest)
@@ -219,6 +234,9 @@ class Extractor:
         elif current_state == UnitState.PENDING_EXTRACT:
             # Уже в PENDING_EXTRACT, переводим в CLASSIFIED_2
             new_state = UnitState.CLASSIFIED_2
+        elif current_state == UnitState.CLASSIFIED_2 and current_cycle == 2:
+            # Для UNITов в CLASSIFIED_2 с циклом 2 переходим в CLASSIFIED_3
+            new_state = UnitState.CLASSIFIED_3
         elif current_cycle == 2:
             # Для цикла 2 переходим в CLASSIFIED_3
             new_state = UnitState.CLASSIFIED_3
@@ -416,17 +434,98 @@ class Extractor:
         self, archive_path: Path, extract_dir: Path, max_size: int, max_depth: int, flatten: bool
     ) -> List[Dict[str, Any]]:
         """Извлекает RAR архив."""
-        # Реализация через rarfile
         extracted_files = []
-        # TODO: Реализовать полную логику
+        total_size = 0
+        file_count = 0
+
+        with rarfile.RarFile(archive_path, "r") as rar_ref:
+            for member in rar_ref.infolist():
+                # Проверка на zip bomb
+                total_size += member.file_size
+                file_count += 1
+
+                if total_size > max_size:
+                    raise QuarantineError(
+                        f"Archive exceeds size limit: {total_size} > {max_size}",
+                        reason="zip_bomb_size",
+                    )
+
+                if file_count > self.MAX_FILES_IN_ARCHIVE:
+                    raise QuarantineError(
+                        f"Archive exceeds file count limit: {file_count} > {self.MAX_FILES_IN_ARCHIVE}",
+                        reason="zip_bomb_count",
+                    )
+
+                # Санитизируем имя файла
+                safe_name = sanitize_filename(member.filename)
+
+                if flatten:
+                    # Размещаем все в одной директории
+                    target_path = extract_dir / Path(safe_name).name
+                else:
+                    # Сохраняем структуру
+                    target_path = extract_dir / safe_name
+
+                # Извлекаем файл
+                rar_ref.extract(member, extract_dir)
+                if target_path.exists():
+                    extracted_files.append(
+                        {
+                            "original_name": member.filename,
+                            "extracted_path": str(target_path),
+                            "size": member.file_size,
+                        }
+                    )
+
         return extracted_files
 
     def _extract_7z(
         self, archive_path: Path, extract_dir: Path, max_size: int, max_depth: int, flatten: bool
     ) -> List[Dict[str, Any]]:
         """Извлекает 7z архив."""
-        # Реализация через py7zr
         extracted_files = []
-        # TODO: Реализовать полную логику
+        total_size = 0
+        file_count = 0
+
+        with py7zr.SevenZipFile(archive_path, "r") as sz_ref:
+            # Получаем информацию о файлах
+            file_list = sz_ref.list()
+            
+            for file_info in file_list:
+                # Проверка на zip bomb
+                # Для 7z используем uncompressed_size если доступен
+                file_size = getattr(file_info, 'uncompressed', 0) or getattr(file_info, 'size', 0)
+                total_size += file_size
+                file_count += 1
+
+                if total_size > max_size:
+                    raise QuarantineError(
+                        f"Archive exceeds size limit: {total_size} > {max_size}",
+                        reason="zip_bomb_size",
+                    )
+
+                if file_count > self.MAX_FILES_IN_ARCHIVE:
+                    raise QuarantineError(
+                        f"Archive exceeds file count limit: {file_count} > {self.MAX_FILES_IN_ARCHIVE}",
+                        reason="zip_bomb_count",
+                    )
+
+            # Извлекаем все файлы
+            extracted = sz_ref.extractall(path=str(extract_dir))
+            
+            # Получаем список извлеченных файлов
+            for filename in extracted:
+                file_path = extract_dir / filename
+                if file_path.exists():
+                    # Получаем размер файла
+                    file_size = file_path.stat().st_size
+                    extracted_files.append(
+                        {
+                            "original_name": filename,
+                            "extracted_path": str(file_path),
+                            "size": file_size,
+                        }
+                    )
+
         return extracted_files
 

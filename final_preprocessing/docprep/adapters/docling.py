@@ -187,9 +187,9 @@ class DoclingAdapter:
                     # Для файлов без трансформаций определяем по типу
                     detected_type = file_info.get("detected_type", "").lower()
                     if detected_type in ["pdf", "docx", "xlsx", "pptx", "html", "xml"]:
-                    role = "document"
-                else:
-                    role = "attachment"
+                        role = "document"
+                    else:
+                        role = "attachment"
 
             file_node = {
                 "type": "FileNode",

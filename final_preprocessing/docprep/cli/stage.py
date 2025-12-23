@@ -240,7 +240,7 @@ def stage_merge(
                 # Для Convert - проверяем наличие операции convert с успешным результатом
                 if merge_category == "Converted":
                     has_convert = any(
-                        op.get("type") == "convert" and op.get("to") is not None
+                        op.get("type") == "convert" and op.get("success", False)
                         for op in operations
                     )
                     if not has_convert:
@@ -248,17 +248,23 @@ def stage_merge(
                         typer.echo(f"  ⚠️  {unit_path.name}: Не был конвертирован, пропускаем merge", err=True)
                         continue
                 
-                # Для Extract - проверяем наличие операции extract
+                # Для Extract - проверяем наличие операции extract с успешным результатом
                 elif merge_category == "Extracted":
-                    has_extract = any(op.get("type") == "extract" for op in operations)
+                    has_extract = any(
+                        op.get("type") == "extract" and op.get("files_extracted", 0) > 0
+                        for op in operations
+                    )
                     if not has_extract:
                         # UNIT не был извлечен - пропускаем merge
                         typer.echo(f"  ⚠️  {unit_path.name}: Не был извлечен, пропускаем merge", err=True)
                         continue
                 
-                # Для Normalize - проверяем наличие операции normalize
+                # Для Normalize - проверяем наличие операции normalize с успешным результатом
                 elif merge_category == "Normalized":
-                    has_normalize = any(op.get("type") == "normalize" for op in operations)
+                    has_normalize = any(
+                        op.get("type") == "normalize" and op.get("files_normalized", 0) > 0
+                        for op in operations
+                    )
                     if not has_normalize:
                         # UNIT не был нормализован - пропускаем merge
                         typer.echo(f"  ⚠️  {unit_path.name}: Не был нормализован, пропускаем merge", err=True)
@@ -407,16 +413,16 @@ def stage_merge(
                         # Перезагружаем state machine после возможных изменений
                         state_machine = UnitStateMachine(target_unit_path.name, manifest_path)
                         if state_machine.can_transition_to(merge_state):
-                update_unit_state(
-                    unit_path=target_unit_path,
-                    new_state=merge_state,
-                    cycle=cycle,
-                    operation={
-                        "type": "merge",
-                        "category": actual_category,
-                        "cycle": cycle,
-                    },
-                )
+                            update_unit_state(
+                                unit_path=target_unit_path,
+                                new_state=merge_state,
+                                cycle=cycle,
+                                operation={
+                                    "type": "merge",
+                                    "category": actual_category,
+                                    "cycle": cycle,
+                                },
+                            )
                         else:
                             typer.echo(f"  ⚠️  {unit_path.name}: Cannot transition to {merge_state.value}, пропускаем", err=True)
                             continue

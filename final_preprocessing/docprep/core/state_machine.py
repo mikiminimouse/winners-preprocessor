@@ -48,6 +48,7 @@ ALLOWED_TRANSITIONS: Dict[UnitState, List[UnitState]] = {
         UnitState.PENDING_CONVERT,
         UnitState.PENDING_EXTRACT,
         UnitState.PENDING_NORMALIZE,
+        UnitState.CLASSIFIED_3,
         UnitState.EXCEPTION_2,
     ],
     UnitState.CLASSIFIED_3: [

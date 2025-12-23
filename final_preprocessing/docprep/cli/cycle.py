@@ -154,18 +154,18 @@ def cycle_run(
                 try:
                     # Определяем целевую директорию для merge
                     target_merge_dir = cycle_paths["merge"] / merge_category
-        stage_merge(
-            cycle=cycle_num,
+                    stage_merge(
+                        cycle=cycle_num,
                         source_dir=source_processing_dir,
                         target_dir=target_merge_dir,
-            protocol_date=protocol_date,
-            verbose=verbose,
-            dry_run=dry_run,
-        )
-    except Exception as e:
+                        protocol_date=protocol_date,
+                        verbose=verbose,
+                        dry_run=dry_run,
+                    )
+                except Exception as e:
                     typer.echo(f"  ⚠️  Ошибка merge {processing_category}: {e}", err=True)
-        if dry_run:
-            raise
+                    if dry_run:
+                        raise
 
     typer.echo(f"\n✅ Цикл {cycle_num} завершен")
 

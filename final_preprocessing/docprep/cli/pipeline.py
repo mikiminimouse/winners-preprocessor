@@ -108,6 +108,7 @@ def pipeline_run(
         )
         merge_dirs.append(cycle_paths["merge"])
 
+    typer.echo(f"🔍 Merge dirs: {[str(d) for d in merge_dirs]}")
     result = merger_engine.collect_units(merge_dirs, output_dir)
     typer.echo(f"✅ Обработано UNIT: {result['units_processed']}")
     if result.get("errors"):
@@ -115,4 +116,37 @@ def pipeline_run(
         if verbose:
             for error in result["errors"][:10]:  # Показываем первые 10 ошибок
                 typer.echo(f"  ❌ {error.get('unit_id', 'unknown')}: {error.get('error', 'unknown error')}", err=True)
+
+    # Очищаем Merge директории после успешного финального merge
+    if result['units_processed'] > 0:
+        typer.echo("🧹 Очистка Merge директорий...")
+        for merge_dir in merge_dirs:
+            if merge_dir.exists():
+                import shutil
+                try:
+                    # Очищаем содержимое директории, но оставляем саму директорию
+                    for item in merge_dir.iterdir():
+                        if item.is_file():
+                            item.unlink()
+                        elif item.is_dir():
+                            shutil.rmtree(item)
+                    typer.echo(f"  ✅ Очищено: {merge_dir}")
+                except Exception as e:
+                    typer.echo(f"  ⚠️  Ошибка очистки {merge_dir}: {e}", err=True)
+
+        # Очищаем Processing директории
+        typer.echo("🧹 Очистка Processing директорий...")
+        processing_base = data_paths["processing"]
+        for cycle_num in range(1, max_cycles + 1):
+            cycle_processing_dir = processing_base / f"Processing_{cycle_num}"
+            if cycle_processing_dir.exists():
+                try:
+                    for item in cycle_processing_dir.iterdir():
+                        if item.is_file():
+                            item.unlink()
+                        elif item.is_dir():
+                            shutil.rmtree(item)
+                    typer.echo(f"  ✅ Очищено: {cycle_processing_dir}")
+                except Exception as e:
+                    typer.echo(f"  ⚠️  Ошибка очистки {cycle_processing_dir}: {e}", err=True)
 

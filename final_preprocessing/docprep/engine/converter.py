@@ -148,10 +148,10 @@ class Converter:
                     })
                     target_format_used = target_format
                 else:
-                result = self._convert_file(file_path, source_format, target_format, engine)
+                    result = self._convert_file(file_path, source_format, target_format, engine)
                     if result.get("success"):
-                converted_files.append(result)
-                target_format_used = target_format  # Используем последний целевой формат
+                        converted_files.append(result)
+                        target_format_used = target_format  # Используем последний целевой формат
 
                 # Обновляем manifest
                 if manifest:
