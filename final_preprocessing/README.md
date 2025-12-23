@@ -113,20 +113,25 @@ docprep/
 ├── core/             # Ядро системы
 ├── adapters/         # Адаптеры (Docling)
 ├── utils/            # Утилиты
-└── schemas/          # JSON схемы
+├── schemas/          # JSON схемы
+├── docs/             # Документация
+├── scripts/          # Утилиты и скрипты
+└── tests/            # Тесты
 ```
 
 ## Утилиты
 
-Утилиты для работы с данными находятся в `scripts/`:
+Утилиты для работы с данными находятся в `docprep/scripts/`:
 - `cleanup_test_data.py` - очистка тестовых данных с сохранением Input
+- `collect_analytics.py` - сбор аналитики по обработке UNIT
+- `generate_final_detailed_report.py` - генерация детальных отчетов
 
 ## Тестирование
 
-Подробное руководство по тестированию через CLI: см. `docs/TESTING_GUIDE_CLI.md`
+Подробное руководство по тестированию через CLI: см. `docprep/docs/TESTING_GUIDE_CLI.md`
 
-Интеграционные тесты находятся в `preprocessing/tests/integration/`:
-- `test_final_preprocessing_pipeline.py` - полный pipeline тест
+Тесты находятся в `docprep/tests/`:
+- Интеграционные тесты для всех компонентов
 
 ### Быстрый старт тестирования
 
@@ -152,17 +157,17 @@ docprep stats show 2025-12-20 --detailed
 
 ## Документация
 
-Полная документация находится в директории `docs/`:
+Полная документация находится в директории `docprep/docs/`:
 
-- **[INDEX.md](docs/INDEX.md)** - Индекс всей документации
-- **[MEMORY_BANK.md](docs/MEMORY_BANK.md)** - Memory bank структура документации
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Архитектура системы
-- **[SYSTEM_COMPONENTS.md](docs/SYSTEM_COMPONENTS.md)** - Компоненты системы
-- **[TESTING_GUIDE_CLI.md](docs/TESTING_GUIDE_CLI.md)** - Руководство по тестированию
-- **[STATISTICS_GUIDE.md](docs/STATISTICS_GUIDE.md)** - Руководство по статистике
-- **[CHANGELOG.md](docs/CHANGELOG.md)** - История изменений
+- **[INDEX.md](docprep/docs/INDEX.md)** - Индекс всей документации
+- **[MEMORY_BANK.md](docprep/docs/MEMORY_BANK.md)** - Memory bank структура документации
+- **[ARCHITECTURE.md](docprep/docs/ARCHITECTURE.md)** - Архитектура системы
+- **[SYSTEM_COMPONENTS.md](docprep/docs/SYSTEM_COMPONENTS.md)** - Компоненты системы
+- **[TESTING_GUIDE_CLI.md](docprep/docs/TESTING_GUIDE_CLI.md)** - Руководство по тестированию
+- **[STATISTICS_GUIDE.md](docprep/docs/STATISTICS_GUIDE.md)** - Руководство по статистике
+- **[CHANGELOG.md](docprep/docs/CHANGELOG.md)** - История изменений
 
-Для быстрого старта см. [QUICK_START_TESTING.md](docs/QUICK_START_TESTING.md)
+Для быстрого старта см. [QUICK_START_TESTING.md](docprep/docs/QUICK_START_TESTING.md)
 
 ## Требования
 
