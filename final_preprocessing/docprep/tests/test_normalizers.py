@@ -52,6 +52,17 @@ def test_extension_normalizer_fixes_wrong_extension(temp_dir):
     wrong_file = unit_path / "document.txt"
     wrong_file.write_bytes(b"%PDF-1.4 fake pdf content")
     
+    # Создаем manifest
+    from docprep.core.manifest import create_manifest_v2, save_manifest
+    from docprep.core.state_machine import UnitState
+    manifest = create_manifest_v2(
+        unit_id=unit_path.name,
+        files=[{"current_name": "document.txt", "detected_type": "pdf"}],
+        current_cycle=1,
+        state_trace=[UnitState.PENDING_NORMALIZE.value],
+    )
+    save_manifest(unit_path, manifest)
+    
     normalizer = ExtensionNormalizer()
     result = normalizer.normalize_extensions(
         unit_path=unit_path,

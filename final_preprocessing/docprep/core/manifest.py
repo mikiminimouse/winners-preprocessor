@@ -7,7 +7,7 @@ Manifest = состояние UNIT, хранит текущее состояни
 import json
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .state_machine import UnitState
 
@@ -46,10 +46,26 @@ def save_manifest(unit_path: Path, manifest: Dict[str, Any]) -> None:
     manifest_path = unit_path / "manifest.json"
 
     # Обновляем updated_at
-    manifest["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    manifest["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+
+def _determine_route_from_files(files: List[Dict[str, Any]]) -> str:
+    """
+    Определяет route для обработки на основе файлов.
+    
+    Делегирует в unified routing registry для консистентности.
+    
+    Args:
+        files: Список файлов с информацией о типах
+        
+    Returns:
+        Route строка: pdf_text, pdf_scan, docx, xlsx, pptx, html, xml, image_ocr, rtf, mixed
+    """
+    from .routing import determine_route_from_files as _routing_determine
+    return _routing_determine(files)
 
 
 def create_manifest_v2(
@@ -89,22 +105,7 @@ def create_manifest_v2(
         state_trace = ["RAW"]
 
     # Определяем route для обработки
-    route = None
-    if len(files) == 1:
-        f = files[0]
-        detected_type = f.get("detected_type", "unknown")
-        needs_ocr = f.get("needs_ocr", False)
-
-        if detected_type == "pdf":
-            route = "pdf_scan" if needs_ocr else "pdf_text"
-        elif detected_type == "docx":
-            route = "docx"
-        elif detected_type in ["jpg", "jpeg", "png", "tiff"]:
-            route = "image_ocr"
-        elif detected_type == "html":
-            route = "html_text"
-    else:
-        route = "mixed"
+    route = _determine_route_from_files(files)
 
     # Формируем список файлов с трансформациями
     files_list = []
@@ -112,7 +113,9 @@ def create_manifest_v2(
         file_entry = {
             "original_name": file_info.get("original_name", ""),
             "current_name": file_info.get("current_name", file_info.get("original_name", "")),
-            "mime_detected": file_info.get("mime_type", ""),
+            "mime_detected": file_info.get("mime_type", file_info.get("mime_detected", "")),
+            "detected_type": file_info.get("detected_type", "unknown"),
+            "needs_ocr": file_info.get("needs_ocr", False),
             "pages_or_parts": file_info.get("pages_or_parts", 1),
             "transformations": file_info.get("transformations", []),
         }
@@ -135,6 +138,15 @@ def create_manifest_v2(
             "expected_content": ["protocol", "attachments"],
         },
         "files": files_list,
+        "files_metadata": {
+            f.get("original_name", ""): {
+                "detected_type": f.get("detected_type", "unknown"),
+                "needs_ocr": f.get("needs_ocr", False),
+                "mime_type": f.get("mime_detected", "unknown"),
+                "pages_or_parts": f.get("pages_or_parts", 1),
+            }
+            for f in files_list
+        },
         "processing": {
             "current_cycle": current_cycle,
             "max_cycles": 3,
@@ -153,8 +165,8 @@ def create_manifest_v2(
             "checksum": "",  # Можно вычислить SHA256 для всего UNIT
             "file_count": len(files),
         },
-        "created_at": datetime.utcnow().isoformat() + "Z",
-        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
     return manifest
@@ -186,7 +198,7 @@ def update_manifest_operation(
 
     # Добавляем timestamp если не указан
     if "timestamp" not in operation:
-        operation["timestamp"] = datetime.utcnow().isoformat() + "Z"
+        operation["timestamp"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     # Добавляем операцию к файлу
     if "files" in manifest and len(manifest["files"]) > file_index:
@@ -200,7 +212,7 @@ def update_manifest_operation(
         manifest["applied_operations"] = []
     manifest["applied_operations"].append(operation)
 
-    manifest["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    manifest["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     return manifest
 
@@ -240,7 +252,8 @@ def update_manifest_state(
     manifest["processing"]["current_cycle"] = cycle
     manifest["processing"]["current_state"] = state.value
 
-    manifest["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    manifest["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     return manifest
+
 

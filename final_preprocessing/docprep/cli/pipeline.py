@@ -12,11 +12,11 @@ from ..engine.extractor import Extractor
 from ..engine.merger import Merger
 from ..core.config import get_cycle_paths, init_directory_structure, get_data_paths
 
-app = typer.Typer(name="pipeline", help="Полный прогон preprocessing")
+app = typer.Typer(help="Полный прогон preprocessing")
 
 
 @app.command("run")
-def pipeline_run(
+def run(
     input_dir: Path = typer.Argument(..., help="Входная директория (Input)"),
     output_dir: Path = typer.Argument(..., help="Выходная директория (Ready2Docling)"),
     max_cycles: int = typer.Option(3, "--max-cycles", help="Максимальное количество циклов"),
@@ -78,16 +78,18 @@ def pipeline_run(
             )
 
         except Exception as e:
+            msg = f"Ошибка в цикле {cycle_num}: {e}"
             if stop_on_exception:
-                typer.echo(f"❌ Ошибка в цикле {cycle_num}: {e}", err=True)
+                typer.echo(f"❌ {msg}", err=True)
                 raise
             else:
-                typer.echo(f"⚠️  Предупреждение в цикле {cycle_num}: {e}", err=True)
+                typer.echo(f"⚠️  {msg} - пропуск цикла", err=True)
                 continue
 
     # Финальный merge из всех Merge_N в Ready2Docling
-    if verbose:
-        typer.echo("\n=== Финальный merge в Ready2Docling ===")
+    typer.echo(f"\n{'='*60}")
+    typer.echo("🏁 ФИНАЛЬНЫЙ MERGE в Ready2Docling")
+    typer.echo(f"{'='*60}")
 
     # Получаем правильные пути для merge директорий
     data_paths = get_data_paths(protocol_date)
@@ -106,47 +108,67 @@ def pipeline_run(
             data_paths["merge"],
             data_paths["exceptions"]
         )
-        merge_dirs.append(cycle_paths["merge"])
+        if cycle_paths["merge"].exists():
+             merge_dirs.append(cycle_paths["merge"])
 
-    typer.echo(f"🔍 Merge dirs: {[str(d) for d in merge_dirs]}")
-    result = merger_engine.collect_units(merge_dirs, output_dir)
-    typer.echo(f"✅ Обработано UNIT: {result['units_processed']}")
-    if result.get("errors"):
-        typer.echo(f"⚠️  Ошибок: {len(result['errors'])}", err=True)
-        if verbose:
-            for error in result["errors"][:10]:  # Показываем первые 10 ошибок
-                typer.echo(f"  ❌ {error.get('unit_id', 'unknown')}: {error.get('error', 'unknown error')}", err=True)
+    typer.echo(f"🔍 Источники для Merge: {[d.name for d in merge_dirs]}")
+    
+    try:
+        result = merger_engine.collect_units(merge_dirs, output_dir)
+        typer.echo(f"✅ Успешно обработано: {result['units_processed']} UNITs")
+        
+        if result.get("errors"):
+            typer.echo(f"⚠️  Ошибок: {len(result['errors'])}", err=True)
+            if verbose:
+                for error in result["errors"][:10]:
+                    typer.echo(f"  ❌ {error.get('unit_id', 'unknown')}: {error.get('error')}", err=True)
+        
+        # Валидация результата
+        ready_units = list(output_dir.rglob("UNIT_*")) if output_dir.exists() else []
+        typer.echo(f"📁 UNITs в Ready2Docling: {len(ready_units)}")
 
-    # Очищаем Merge директории после успешного финального merge
-    if result['units_processed'] > 0:
-        typer.echo("🧹 Очистка Merge директорий...")
-        for merge_dir in merge_dirs:
-            if merge_dir.exists():
-                import shutil
-                try:
-                    # Очищаем содержимое директории, но оставляем саму директорию
-                    for item in merge_dir.iterdir():
-                        if item.is_file():
-                            item.unlink()
-                        elif item.is_dir():
-                            shutil.rmtree(item)
-                    typer.echo(f"  ✅ Очищено: {merge_dir}")
-                except Exception as e:
-                    typer.echo(f"  ⚠️  Ошибка очистки {merge_dir}: {e}", err=True)
+        # Очистка только при успешном завершении и если не dry_run
+        if not dry_run and result['units_processed'] > 0:
+            _cleanup_intermediate_dirs(merge_dirs, data_paths, max_cycles, typer)
 
-        # Очищаем Processing директории
-        typer.echo("🧹 Очистка Processing директорий...")
-        processing_base = data_paths["processing"]
-        for cycle_num in range(1, max_cycles + 1):
-            cycle_processing_dir = processing_base / f"Processing_{cycle_num}"
-            if cycle_processing_dir.exists():
-                try:
-                    for item in cycle_processing_dir.iterdir():
-                        if item.is_file():
-                            item.unlink()
-                        elif item.is_dir():
-                            shutil.rmtree(item)
-                    typer.echo(f"  ✅ Очищено: {cycle_processing_dir}")
-                except Exception as e:
-                    typer.echo(f"  ⚠️  Ошибка очистки {cycle_processing_dir}: {e}", err=True)
+    except Exception as e:
+        typer.echo(f"❌ Критическая ошибка при финальном merge: {e}", err=True)
+        raise
+
+
+def _cleanup_intermediate_dirs(merge_dirs, data_paths, max_cycles, typer_instance):
+    """Очищает промежуточные директории после успешной обработки."""
+    import shutil
+    
+    typer_instance.echo("🧹 Очистка временных директорий...")
+    
+    # Очистка Merge директорий
+    for merge_dir in merge_dirs:
+        if merge_dir.exists():
+            try:
+                for item in merge_dir.iterdir():
+                    if item.is_file():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item)
+            except Exception as e:
+                 typer_instance.echo(f"  ⚠️  Не удалось очистить {merge_dir}: {e}", err=True)
+
+    # Очистка Processing директорий
+    processing_base = data_paths["processing"]
+    for cycle_num in range(1, max_cycles + 1):
+        cycle_processing_dir = processing_base / f"Processing_{cycle_num}"
+        if cycle_processing_dir.exists():
+            try:
+                shutil.rmtree(cycle_processing_dir)
+                cycle_processing_dir.mkdir() # Пересоздаем пустую
+            except Exception as e:
+                typer_instance.echo(f"  ⚠️  Не удалось очистить {cycle_processing_dir}: {e}", err=True)
+                
+    typer_instance.echo("✅ Очистка завершена")
+
+
+if __name__ == "__main__":
+    app()
+
 

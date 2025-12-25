@@ -16,7 +16,7 @@ from ..core.unit_processor import (
     update_unit_state,
     determine_unit_extension,
 )
-from ..core.config import get_cycle_paths, MERGE_DIR
+from ..core.config import get_cycle_paths, MERGE_DIR, get_data_paths
 from ..utils.file_ops import detect_file_type, sanitize_filename
 from ..utils.paths import get_unit_files
 
@@ -111,12 +111,14 @@ class Extractor:
 
         for file_path in all_files:
             detection = detect_file_type(file_path)
-            if detection.get("is_archive") or detection.get("detected_type") in [
-                "zip_archive",
-                "rar_archive",
-                "7z_archive",
-            ]:
+            extension = file_path.suffix.lower()
+            archive_extensions = {".zip", ".rar", ".7z"}
+            
+            if (detection.get("is_archive") or 
+                detection.get("detected_type") in ["zip_archive", "rar_archive", "7z_archive"] or
+                extension in archive_extensions):
                 archive_files.append(file_path)
+
 
         # Проверяем, есть ли уже извлеченные файлы (директории *_extracted)
         has_extracted_dirs = any(
@@ -127,15 +129,52 @@ class Extractor:
         
         # Если нет архивов для извлечения и нет извлеченных директорий, UNIT не должен перемещаться
         if not archive_files and not has_extracted_dirs:
-            logger.warning(f"No archives to extract in unit {unit_id} - unit will not be moved to Extracted")
-            # Если нет архивов для извлечения, UNIT не должен перемещаться в Extracted
+            logger.warning(f"No archives to extract in unit {unit_id} - moving to Exceptions")
+            
+            # Определяем целевую директорию в Exceptions
+            if protocol_date:
+                data_paths = get_data_paths(protocol_date)
+                exceptions_base = data_paths["exceptions"]
+            else:
+                from ..core.config import EXCEPTIONS_DIR
+                exceptions_base = EXCEPTIONS_DIR
+            
+            target_base_dir = exceptions_base / f"Exceptions_{cycle}" / "NoProcessableFiles"
+            
+            # Перемещаем в Exceptions
+            target_dir = move_unit_to_target(
+                unit_dir=unit_path,
+                target_base_dir=target_base_dir,
+                extension=None,
+                dry_run=dry_run,
+            )
+            
+            # Обновляем состояние
+            exception_state_map = {
+                1: UnitState.EXCEPTION_1,
+                2: UnitState.EXCEPTION_2,
+                3: UnitState.EXCEPTION_3,
+            }
+            new_state = exception_state_map.get(cycle, UnitState.EXCEPTION_1)
+            
+            update_unit_state(
+                unit_path=target_dir,
+                new_state=new_state,
+                cycle=cycle,
+                operation={
+                    "type": "extract",
+                    "status": "skipped",
+                    "reason": "no_processable_files",
+                },
+            )
+            
             return {
                 "unit_id": unit_id,
                 "archives_processed": 0,
                 "files_extracted": 0,
                 "extracted_files": [],
                 "errors": [{"error": "No archives found that require extraction"}],
-                "moved_to": str(unit_path),  # Остается на месте
+                "moved_to": str(target_dir),
             }
 
         extracted_files = []
@@ -152,6 +191,7 @@ class Extractor:
                 if manifest:
                     operation = {
                         "type": "extract",
+                        "status": "success",
                         "archive_path": str(archive_path),
                         "extracted_count": len(result.get("files", [])),
                         "cycle": current_cycle,
@@ -173,18 +213,54 @@ class Extractor:
             if f.name not in ["manifest.json", "audit.log.jsonl"]
         )
         
-        # Если не было успешных извлечений и нет уже извлеченных директорий, не перемещаем UNIT
+        # Если не было успешных извлечений и нет уже извлеченных директорий, перемещаем в Exceptions
         if not extracted_files and not has_extracted_dirs and not dry_run:
-            logger.warning(f"No archives were successfully extracted in unit {unit_id} - unit will not be moved")
-            if manifest:
-                save_manifest(unit_path, manifest)
+            logger.warning(f"No archives were successfully extracted in unit {unit_id} - moving to Exceptions")
+            
+            # Определяем целевую директорию в Exceptions
+            if protocol_date:
+                data_paths = get_data_paths(protocol_date)
+                exceptions_base = data_paths["exceptions"]
+            else:
+                from ..core.config import EXCEPTIONS_DIR
+                exceptions_base = EXCEPTIONS_DIR
+            
+            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "FailedExtraction"
+            
+            # Перемещаем в Exceptions
+            target_dir = move_unit_to_target(
+                unit_dir=unit_path,
+                target_base_dir=target_base_dir,
+                extension=None,
+                dry_run=dry_run,
+            )
+            
+            # Обновляем состояние в EXCEPTION_N
+            exception_state_map = {
+                1: UnitState.EXCEPTION_1,
+                2: UnitState.EXCEPTION_2,
+                3: UnitState.EXCEPTION_3,
+            }
+            new_state = exception_state_map.get(current_cycle, UnitState.EXCEPTION_1)
+            
+            update_unit_state(
+                unit_path=target_dir,
+                new_state=new_state,
+                cycle=current_cycle,
+                operation={
+                    "type": "extract",
+                    "status": "failed",
+                    "errors": errors,
+                },
+            )
+            
             return {
                 "unit_id": unit_id,
                 "archives_processed": len(archive_files),
                 "files_extracted": 0,
                 "extracted_files": [],
                 "errors": errors,
-                "moved_to": str(unit_path),  # Остается на месте
+                "moved_to": str(target_dir),
             }
 
         # Сохраняем обновленный manifest
@@ -511,12 +587,13 @@ class Extractor:
                     )
 
             # Извлекаем все файлы
-            extracted = sz_ref.extractall(path=str(extract_dir))
+            sz_ref.extractall(path=str(extract_dir))
             
             # Получаем список извлеченных файлов
-            for filename in extracted:
+            for file_info in file_list:
+                filename = file_info.filename
                 file_path = extract_dir / filename
-                if file_path.exists():
+                if file_path.exists() and file_path.is_file():
                     # Получаем размер файла
                     file_size = file_path.stat().st_size
                     extracted_files.append(

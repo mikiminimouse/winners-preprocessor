@@ -1,3 +1,0 @@
-"""
-WebUI Handlers Package
-"""

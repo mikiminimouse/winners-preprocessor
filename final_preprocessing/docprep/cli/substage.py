@@ -2,8 +2,16 @@
 Substage - атомарные операции (convert, extract, normalize).
 """
 import typer
+try:
+    from typer.models import OptionInfo
+except ImportError:
+    # Typer < 0.4.0 uses typer.models.OptionInfo
+    # Typer >= 0.4.0 might put it elsewhere or it is accessible
+    # This is a safe fallback if imports change
+    OptionInfo = typer.models.OptionInfo
+
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime
 
 from ..engine.converter import Converter
@@ -13,6 +21,13 @@ from ..core.unit_processor import process_directory_units
 from ..utils.paths import find_all_units
 
 app = typer.Typer(name="substage", help="Атомарные операции")
+
+
+def _unwrap(val: Any) -> Any:
+    """Извлекает значение по умолчанию из OptionInfo, если оно передано."""
+    if isinstance(val, OptionInfo):
+        return val.default
+    return val
 
 
 @app.command("convert")
@@ -27,6 +42,16 @@ def substage_convert_run(
     dry_run: bool = typer.Option(False, "--dry-run", help="Режим имитации"),
 ):
     """Конвертация форматов (doc→docx и т.д.)."""
+    # Unwrap arguments if called programmatically
+    input_dir = _unwrap(input_dir)
+    cycle = _unwrap(cycle)
+    from_format = _unwrap(from_format)
+    to_format = _unwrap(to_format)
+    engine = _unwrap(engine)
+    protocol_date = _unwrap(protocol_date)
+    verbose = _unwrap(verbose)
+    dry_run = _unwrap(dry_run)
+
     if not input_dir.exists():
         typer.echo(f"❌ Директория не найдена: {input_dir}", err=True)
         raise typer.Exit(1)
@@ -76,6 +101,16 @@ def substage_extract_run(
     dry_run: bool = typer.Option(False, "--dry-run", help="Режим имитации"),
 ):
     """Разархивация архивов."""
+    # Unwrap arguments
+    input_dir = _unwrap(input_dir)
+    cycle = _unwrap(cycle)
+    max_depth = _unwrap(max_depth)
+    keep_archive = _unwrap(keep_archive)
+    flatten = _unwrap(flatten)
+    protocol_date = _unwrap(protocol_date)
+    verbose = _unwrap(verbose)
+    dry_run = _unwrap(dry_run)
+
     if not input_dir.exists():
         typer.echo(f"❌ Директория не найдена: {input_dir}", err=True)
         raise typer.Exit(1)
@@ -122,6 +157,13 @@ def substage_normalize_name(
     dry_run: bool = typer.Option(False, "--dry-run", help="Режим имитации"),
 ):
     """Нормализация имени файла (ТОЛЬКО имя)."""
+    # Unwrap arguments
+    input_dir = _unwrap(input_dir)
+    cycle = _unwrap(cycle)
+    protocol_date = _unwrap(protocol_date)
+    verbose = _unwrap(verbose)
+    dry_run = _unwrap(dry_run)
+
     if not input_dir.exists():
         typer.echo(f"❌ Директория не найдена: {input_dir}", err=True)
         raise typer.Exit(1)
@@ -165,6 +207,13 @@ def substage_normalize_extension(
     dry_run: bool = typer.Option(False, "--dry-run", help="Режим имитации"),
 ):
     """Нормализация расширения (по сигнатурам)."""
+    # Unwrap arguments
+    input_dir = _unwrap(input_dir)
+    cycle = _unwrap(cycle)
+    protocol_date = _unwrap(protocol_date)
+    verbose = _unwrap(verbose)
+    dry_run = _unwrap(dry_run)
+
     if not input_dir.exists():
         typer.echo(f"❌ Директория не найдена: {input_dir}", err=True)
         raise typer.Exit(1)
@@ -208,6 +257,13 @@ def substage_normalize_full(
     dry_run: bool = typer.Option(False, "--dry-run", help="Режим имитации"),
 ):
     """Полная нормализация (имя + расширение)."""
+    # Unwrap arguments
+    input_dir = _unwrap(input_dir)
+    cycle = _unwrap(cycle)
+    protocol_date = _unwrap(protocol_date)
+    verbose = _unwrap(verbose)
+    dry_run = _unwrap(dry_run)
+
     if not input_dir.exists():
         typer.echo(f"❌ Директория не найдена: {input_dir}", err=True)
         raise typer.Exit(1)
@@ -253,4 +309,5 @@ def substage_normalize_full(
     typer.echo(f"\n✅ Обработано UNIT: {results['units_processed']}")
     if results['units_failed'] > 0:
         typer.echo(f"❌ Ошибок: {results['units_failed']}", err=True)
+
 

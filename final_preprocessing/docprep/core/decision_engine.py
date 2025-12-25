@@ -37,13 +37,7 @@ class TypeDecisionEngine:
             extension: расширение файла
 
         Returns:
-            Словарь с решением:
-            - true_type: истинный тип файла
-            - classification: "direct" | "normalize" | "ambiguous"
-            - scenario: идентификатор сценария ("2.1", "2.2", и т.д.)
-            - confidence: общий уровень уверенности
-            - sources_agreement: все ли источники согласны
-            - conflict_reason: причина конфликта (если есть)
+            Словарь с решением (true_type, classification, scenario, etc.)
         """
         # Нормализуем типы для сравнения
         mime_norm = self._normalize_type(mime_type)
@@ -55,205 +49,177 @@ class TypeDecisionEngine:
         if sig_norm == "zip_or_office" and mime_norm == "zip":
             mime_norm = "zip_or_office"
 
+        ctx = {
+            "mime_norm": mime_norm,
+            "sig_norm": sig_norm,
+            "ext_norm": ext_norm,
+            "mime_conf": mime_confidence,
+            "sig_conf": signature_confidence,
+            "mime_type_raw": mime_type,
+        }
+
         # Scenario 2.1: Все три совпали
         if mime_norm == sig_norm == ext_norm and sig_norm:
-            return {
-                "true_type": sig_norm,
-                "classification": "direct",
-                "scenario": "2.1",
-                "confidence": 1.0,
-                "sources_agreement": True,
-                "conflict_reason": None,
-            }
+            return self._result(sig_norm, "direct", "2.1", 1.0, True, None)
 
         # Scenario 2.2: MIME+Signature совпали ≠ Extension
         if mime_norm == sig_norm != ext_norm and sig_norm:
-            # Для zip_or_office и ole2 нельзя определить correct_extension до структурного парсинга
-            if sig_norm in ["zip_or_office", "ole2"]:
-                return {
-                    "true_type": sig_norm,
-                    "classification": "normalize",
-                    "scenario": "2.2",
-                    "confidence": min(mime_confidence, signature_confidence),
-                    "sources_agreement": False,
-                    "conflict_reason": f"MIME+Signature={sig_norm} but Extension={ext_norm}, needs structural parsing",
-                    "correct_extension": None,  # Будет определен после структурного парсинга
-                }
-            correct_ext = self._type_to_extension(sig_norm)
-            return {
-                "true_type": sig_norm,
-                "classification": "normalize",
-                "scenario": "2.2",
-                "confidence": min(mime_confidence, signature_confidence),
-                "sources_agreement": False,
-                "conflict_reason": f"MIME+Signature={sig_norm} but Extension={ext_norm}",
-                "correct_extension": correct_ext,
-            }
+            return self._handle_mismatch_extension(ctx)
 
         # Scenario 2.3: Signature+Extension совпали ≠ MIME
         if sig_norm == ext_norm != mime_norm and sig_norm:
-            # Для zip_or_office и ole2 нельзя определить correct_extension до структурного парсинга
-            if sig_norm in ["zip_or_office", "ole2"]:
-                return {
-                    "true_type": sig_norm,
-                    "classification": "normalize",
-                    "scenario": "2.3",
-                    "confidence": signature_confidence,
-                    "sources_agreement": False,
-                    "conflict_reason": f"Signature+Extension={sig_norm} but MIME={mime_norm}, needs structural parsing",
-                    "correct_extension": None,  # Будет определен после структурного парсинга
-                }
-            correct_ext = self._type_to_extension(sig_norm)
-            return {
-                "true_type": sig_norm,
-                "classification": "normalize",
-                "scenario": "2.3",
-                "confidence": signature_confidence,
-                "sources_agreement": False,
-                "conflict_reason": f"Signature+Extension={sig_norm} but MIME={mime_norm}",
-                "correct_extension": correct_ext,
-            }
+            return self._handle_mismatch_mime(ctx)
 
         # Scenario 2.4: MIME+Extension совпали ≠ Signature
         if mime_norm == ext_norm != sig_norm and mime_norm:
-            correct_ext = self._type_to_extension(mime_norm)
-            if mime_confidence >= self.CONFIDENCE_THRESHOLD:
-                return {
-                    "true_type": mime_norm,
-                    "classification": "direct",
-                    "scenario": "2.4",
-                    "confidence": mime_confidence,
-                    "sources_agreement": False,
-                    "conflict_reason": f"MIME+Extension={mime_norm} but Signature={sig_norm}",
-                    "correct_extension": None,
-                }
-            else:
-                return {
-                    "true_type": None,
-                    "classification": "ambiguous",
-                    "scenario": "2.4",
-                    "confidence": mime_confidence,
-                    "sources_agreement": False,
-                    "conflict_reason": f"Low MIME confidence ({mime_confidence})",
-                    "correct_extension": None,
-                }
+            return self._handle_mismatch_signature(ctx)
 
         # Scenario 2.5: Все три разные
         if mime_norm and sig_norm and ext_norm and mime_norm != sig_norm != ext_norm and mime_norm != ext_norm:
-            # Приоритет: signature → mime → extension
-            if signature_confidence >= self.CONFIDENCE_THRESHOLD:
-                correct_ext = self._type_to_extension(sig_norm)
-                return {
-                    "true_type": sig_norm,
-                    "classification": "normalize",
-                    "scenario": "2.5",
-                    "confidence": signature_confidence,
-                    "sources_agreement": False,
-                    "conflict_reason": "All sources differ, using signature",
-                    "correct_extension": correct_ext,
-                }
-            elif mime_confidence >= self.CONFIDENCE_THRESHOLD:
-                correct_ext = self._type_to_extension(mime_norm)
-                return {
-                    "true_type": mime_norm,
-                    "classification": "normalize",
-                    "scenario": "2.5",
-                    "confidence": mime_confidence,
-                    "sources_agreement": False,
-                    "conflict_reason": "All sources differ, using MIME",
-                    "correct_extension": correct_ext,
-                }
-            else:
-                return {
-                    "true_type": None,
-                    "classification": "ambiguous",
-                    "scenario": "2.5",
-                    "confidence": max(signature_confidence, mime_confidence),
-                    "sources_agreement": False,
-                    "conflict_reason": "All sources differ, low confidence",
-                    "correct_extension": None,
-                }
+            return self._handle_all_differs(ctx)
 
         # Scenario 2.6: MIME = octet-stream
         if mime_type == "application/octet-stream":
-            if sig_norm:
-                correct_ext = self._type_to_extension(sig_norm)
-                return {
-                    "true_type": sig_norm,
-                    "classification": "normalize",
-                    "scenario": "2.6",
-                    "confidence": signature_confidence,
-                    "sources_agreement": False,
-                    "conflict_reason": "MIME=octet-stream, using signature",
-                    "correct_extension": correct_ext,
-                }
-            elif ext_norm:
-                correct_ext = self._type_to_extension(ext_norm)
-                return {
-                    "true_type": ext_norm,
-                    "classification": "normalize",
-                    "scenario": "2.6",
-                    "confidence": 0.5,  # Низкая уверенность для extension
-                    "sources_agreement": False,
-                    "conflict_reason": "MIME=octet-stream, using extension",
-                    "correct_extension": correct_ext,
-                }
-            else:
-                return {
-                    "true_type": None,
-                    "classification": "ambiguous",
-                    "scenario": "2.6",
-                    "confidence": 0.0,
-                    "sources_agreement": False,
-                    "conflict_reason": "MIME=octet-stream, no other sources",
-                    "correct_extension": None,
-                }
+            return self._handle_octet_stream(ctx)
 
         # Scenario 2.7: Signature отсутствует
         if not sig_norm:
-            if mime_confidence >= self.CONFIDENCE_THRESHOLD:
-                correct_ext = self._type_to_extension(mime_norm)
-                return {
-                    "true_type": mime_norm,
-                    "classification": "normalize",
-                    "scenario": "2.7",
-                    "confidence": mime_confidence,
-                    "sources_agreement": False,
-                    "conflict_reason": "No signature, using MIME",
-                    "correct_extension": correct_ext,
-                }
-            elif ext_norm:
-                correct_ext = self._type_to_extension(ext_norm)
-                return {
-                    "true_type": ext_norm,
-                    "classification": "normalize",
-                    "scenario": "2.7",
-                    "confidence": 0.5,
-                    "sources_agreement": False,
-                    "conflict_reason": "No signature, low MIME confidence, using extension",
-                    "correct_extension": correct_ext,
-                }
-            else:
-                return {
-                    "true_type": None,
-                    "classification": "ambiguous",
-                    "scenario": "2.7",
-                    "confidence": 0.0,
-                    "sources_agreement": False,
-                    "conflict_reason": "No signature, no reliable sources",
-                    "correct_extension": None,
-                }
+            return self._handle_missing_signature(ctx)
 
         # Fallback
+        return self._result(
+            mime_norm or ext_norm, 
+            "ambiguous", 
+            "unknown", 
+            0.0, 
+            False, 
+            "Unable to resolve"
+        )
+    
+    def _result(
+        self,
+        true_type: Optional[str],
+        classification: str,
+        scenario: str,
+        confidence: float,
+        agreement: bool,
+        conflict: Optional[str],
+        correct_ext: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Helper to construct result dictionary."""
         return {
-            "true_type": mime_norm or ext_norm,
-            "classification": "ambiguous",
-            "scenario": "unknown",
-            "confidence": 0.0,
-            "sources_agreement": False,
-            "conflict_reason": "Unable to resolve",
-            "correct_extension": None,
+            "true_type": true_type,
+            "classification": classification,
+            "scenario": scenario,
+            "confidence": confidence,
+            "sources_agreement": agreement,
+            "conflict_reason": conflict,
+            "correct_extension": correct_ext,
         }
+
+    def _handle_mismatch_extension(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        sig_norm = ctx["sig_norm"]
+        ext_norm = ctx["ext_norm"]
+        conf = min(ctx["mime_conf"], ctx["sig_conf"])
+        
+        needs_parse = sig_norm in ["zip_or_office", "ole2"]
+        conflict = f"MIME+Signature={sig_norm} but Extension={ext_norm}"
+        if needs_parse:
+            conflict += ", needs structural parsing"
+        
+        correct_ext = None if needs_parse else self._type_to_extension(sig_norm)
+        return self._result(sig_norm, "normalize", "2.2", conf, False, conflict, correct_ext)
+
+    def _handle_mismatch_mime(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        sig_norm = ctx["sig_norm"]
+        mime_norm = ctx["mime_norm"]
+        conf = ctx["sig_conf"]
+        
+        needs_parse = sig_norm in ["zip_or_office", "ole2"]
+        conflict = f"Signature+Extension={sig_norm} but MIME={mime_norm}"
+        if needs_parse:
+            conflict += ", needs structural parsing"
+            
+        correct_ext = None if needs_parse else self._type_to_extension(sig_norm)
+        return self._result(sig_norm, "normalize", "2.3", conf, False, conflict, correct_ext)
+
+    def _handle_mismatch_signature(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        mime_norm = ctx["mime_norm"]
+        sig_norm = ctx["sig_norm"]
+        conf = ctx["mime_conf"]
+        
+        if conf >= self.CONFIDENCE_THRESHOLD:
+            return self._result(
+                mime_norm, "direct", "2.4", conf, False, 
+                f"MIME+Extension={mime_norm} but Signature={sig_norm}"
+            )
+        else:
+            return self._result(
+                None, "ambiguous", "2.4", conf, False, 
+                f"Low MIME confidence ({conf})"
+            )
+
+    def _handle_all_differs(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        sig_norm = ctx["sig_norm"]
+        mime_norm = ctx["mime_norm"]
+        sig_conf = ctx["sig_conf"]
+        mime_conf = ctx["mime_conf"]
+        
+        if sig_conf >= self.CONFIDENCE_THRESHOLD:
+            return self._result(
+                sig_norm, "normalize", "2.5", sig_conf, False, 
+                "All sources differ, using signature", self._type_to_extension(sig_norm)
+            )
+        elif mime_conf >= self.CONFIDENCE_THRESHOLD:
+            return self._result(
+                mime_norm, "normalize", "2.5", mime_conf, False, 
+                "All sources differ, using MIME", self._type_to_extension(mime_norm)
+            )
+        else:
+            return self._result(
+                None, "ambiguous", "2.5", max(sig_conf, mime_conf), False, 
+                "All sources differ, low confidence"
+            )
+
+    def _handle_octet_stream(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        sig_norm = ctx["sig_norm"]
+        ext_norm = ctx["ext_norm"]
+        sig_conf = ctx["sig_conf"]
+        
+        if sig_norm:
+            return self._result(
+                sig_norm, "normalize", "2.6", sig_conf, False, 
+                "MIME=octet-stream, using signature", self._type_to_extension(sig_norm)
+            )
+        elif ext_norm:
+            return self._result(
+                ext_norm, "normalize", "2.6", 0.5, False, 
+                "MIME=octet-stream, using extension", self._type_to_extension(ext_norm)
+            )
+        else:
+            return self._result(
+                None, "ambiguous", "2.6", 0.0, False, "MIME=octet-stream, no other sources"
+            )
+
+    def _handle_missing_signature(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        mime_norm = ctx["mime_norm"]
+        ext_norm = ctx["ext_norm"]
+        mime_conf = ctx["mime_conf"]
+        
+        if mime_conf >= self.CONFIDENCE_THRESHOLD:
+            return self._result(
+                mime_norm, "normalize", "2.7", mime_conf, False, 
+                "No signature, using MIME", self._type_to_extension(mime_norm)
+            )
+        elif ext_norm:
+            return self._result(
+                ext_norm, "normalize", "2.7", 0.5, False, 
+                "No signature, low MIME confidence, using extension", self._type_to_extension(ext_norm)
+            )
+        else:
+            return self._result(
+                None, "ambiguous", "2.7", 0.0, False, "No signature, no reliable sources"
+            )
 
     def _normalize_type(self, detected_type: Optional[str]) -> Optional[str]:
         """

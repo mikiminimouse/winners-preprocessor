@@ -28,40 +28,47 @@ class UnitState(Enum):
     EXCEPTION_2 = "EXCEPTION_2"  # Ошибка цикла 2
     EXCEPTION_3 = "EXCEPTION_3"  # Ошибка цикла 3
     READY_FOR_DOCLING = "READY_FOR_DOCLING"  # Финальное состояние
+    MERGER_SKIPPED = "MERGER_SKIPPED"  # Отфильтровано Merger (mixed, unsupported и т.д.)
 
 
 # Разрешенные переходы между состояниями
 ALLOWED_TRANSITIONS: Dict[UnitState, List[UnitState]] = {
-    UnitState.RAW: [UnitState.CLASSIFIED_1, UnitState.EXCEPTION_1],  # EXCEPTION_1 для пустых UNIT
+    UnitState.RAW: [UnitState.CLASSIFIED_1, UnitState.EXCEPTION_1, UnitState.MERGED_DIRECT],  # EXCEPTION_1 для пустых UNIT, MERGED_DIRECT для direct файлов
     UnitState.CLASSIFIED_1: [
+        UnitState.CLASSIFIED_1, # Self-transition allowed for re-classification
         UnitState.MERGED_DIRECT,
         UnitState.PENDING_CONVERT,
         UnitState.PENDING_EXTRACT,
         UnitState.PENDING_NORMALIZE,
         UnitState.EXCEPTION_1,
+        UnitState.MERGER_SKIPPED,
     ],
     UnitState.PENDING_CONVERT: [UnitState.CLASSIFIED_2],
     UnitState.PENDING_EXTRACT: [UnitState.CLASSIFIED_2],
     UnitState.PENDING_NORMALIZE: [UnitState.CLASSIFIED_2],
     UnitState.CLASSIFIED_2: [
+        UnitState.CLASSIFIED_2, # Self-transition allowed for re-classification
         UnitState.MERGED_PROCESSED,
         UnitState.PENDING_CONVERT,
         UnitState.PENDING_EXTRACT,
         UnitState.PENDING_NORMALIZE,
         UnitState.CLASSIFIED_3,
         UnitState.EXCEPTION_2,
+        UnitState.MERGER_SKIPPED,
     ],
     UnitState.CLASSIFIED_3: [
         UnitState.MERGED_PROCESSED,
         UnitState.EXCEPTION_3,
+        UnitState.MERGER_SKIPPED,
     ],
-    UnitState.MERGED_DIRECT: [UnitState.READY_FOR_DOCLING],
-    UnitState.MERGED_PROCESSED: [UnitState.READY_FOR_DOCLING],
-    # Финальные состояния (нет переходов)
+    UnitState.MERGED_DIRECT: [UnitState.READY_FOR_DOCLING, UnitState.MERGER_SKIPPED],
+    UnitState.MERGED_PROCESSED: [UnitState.READY_FOR_DOCLING, UnitState.MERGER_SKIPPED],
+    # Финальные состояния (разрешаем переходы для переобработки/спасения)
     UnitState.READY_FOR_DOCLING: [],
-    UnitState.EXCEPTION_1: [],
-    UnitState.EXCEPTION_2: [],
-    UnitState.EXCEPTION_3: [],
+    UnitState.EXCEPTION_1: [UnitState.CLASSIFIED_1],
+    UnitState.EXCEPTION_2: [UnitState.CLASSIFIED_2],
+    UnitState.EXCEPTION_3: [UnitState.CLASSIFIED_3, UnitState.MERGED_PROCESSED],
+    UnitState.MERGER_SKIPPED: [UnitState.CLASSIFIED_1, UnitState.CLASSIFIED_2, UnitState.CLASSIFIED_3],
 }
 
 
@@ -125,10 +132,13 @@ class UnitStateMachine:
                 # Старый формат manifest - начинаем с RAW
                 self._current_state = UnitState.RAW
                 self._state_trace = [UnitState.RAW.value]
-        except Exception:
-            # При ошибке загрузки начинаем с начального состояния
-            self._current_state = UnitState.RAW
-            self._state_trace = [UnitState.RAW.value]
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse manifest for unit {self.unit_id}: {e}")
+            raise StateTransitionError(f"Failed to parse manifest: {e}", unit_id=self.unit_id)
+        except Exception as e:
+            # При других ошибках логируем и пробрасываем
+            logger.error(f"Error loading manifest for unit {self.unit_id}: {e}")
+            raise
 
     def get_current_state(self) -> UnitState:
         """Возвращает текущее состояние UNIT."""
@@ -228,6 +238,23 @@ class UnitStateMachine:
             UnitState.EXCEPTION_2,
             UnitState.EXCEPTION_3,
         ]
+
+    def transition_and_save(self, new_state: UnitState, manifest_path: Path) -> None:
+        """
+        Атомарно выполняет переход состояния и сохраняет в manifest.
+        
+        Инкапсулирует логику transition() + _save_to_manifest() для
+        предотвращения рассинхронизации состояния и файла.
+        
+        Args:
+            new_state: Целевое состояние
+            manifest_path: Путь к manifest.json
+        
+        Raises:
+            StateTransitionError: Если переход не разрешен
+        """
+        self.transition(new_state)
+        self._save_to_manifest(manifest_path)
 
     def _save_to_manifest(self, manifest_path: Path) -> None:
         """

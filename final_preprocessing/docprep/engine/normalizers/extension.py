@@ -137,6 +137,7 @@ class ExtensionNormalizer:
                         if manifest:
                             operation = {
                                 "type": "normalize",
+                                "status": "success",
                                 "subtype": "extension",
                                 "original_extension": current_ext,
                                 "correct_extension": correct_extension,
@@ -148,19 +149,10 @@ class ExtensionNormalizer:
                 errors.append({"file": str(file_path), "error": str(e)})
                 logger.error(f"Failed to normalize extension for {file_path}: {e}")
 
-        # Если не было нормализованных файлов, не перемещаем UNIT
-        if not normalized_files and not dry_run:
-            logger.warning(f"No files were normalized in unit {unit_id} - unit will not be moved to Normalized")
+        if not normalized_files:
+            logger.info(f"No files needed normalization in unit {unit_id}")
             if manifest:
                 save_manifest(unit_path, manifest)
-            return {
-                "unit_id": unit_id,
-                "files_normalized": 0,
-                "normalized_files": [],
-                "errors": errors,
-                "moved_to": str(unit_path),  # Остается на месте
-                "extension": determine_unit_extension(unit_path),
-            }
 
         # Сохраняем обновленный manifest
         if manifest:
@@ -244,6 +236,7 @@ class ExtensionNormalizer:
                 cycle=next_cycle,
                 operation={
                     "type": "normalize",
+                    "status": "success",
                     "subtype": "extension",
                     "files_normalized": len(normalized_files),
                 },

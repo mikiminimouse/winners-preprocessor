@@ -16,7 +16,7 @@ from ..core.unit_processor import (
     determine_unit_extension,
     get_extension_subdirectory,
 )
-from ..core.config import get_cycle_paths, MERGE_DIR
+from ..core.config import get_cycle_paths, MERGE_DIR, get_data_paths
 from ..utils.file_ops import detect_file_type
 
 logger = logging.getLogger(__name__)
@@ -110,24 +110,67 @@ class Converter:
             # Определяем формат конвертации
             if from_format is None:
                 source_format = detected_type
+                # Fallback на расширение, если detected_type не поддерживается
+                if source_format not in self.CONVERSION_MAP:
+                    ext = file_path.suffix.lower().lstrip(".")
+                    if ext in self.CONVERSION_MAP:
+                        source_format = ext
+
             else:
                 source_format = from_format
 
             if source_format in self.CONVERSION_MAP:
+
                 target_format = to_format or self.CONVERSION_MAP[source_format]
                 files_to_convert.append((file_path, source_format, target_format))
 
         if not files_to_convert:
-            logger.warning(f"No files to convert in unit {unit_id} - unit will not be moved to Converted")
-            # Если нет файлов для конвертации, UNIT не должен перемещаться в Converted
-            # Возвращаем результат без перемещения
+            logger.warning(f"No files to convert in unit {unit_id} - moving to Exceptions")
+            
+            # Определяем целевую директорию в Exceptions
+            if protocol_date:
+                data_paths = get_data_paths(protocol_date)
+                exceptions_base = data_paths["exceptions"]
+            else:
+                from ..core.config import EXCEPTIONS_DIR
+                exceptions_base = EXCEPTIONS_DIR
+            
+            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "NoProcessableFiles"
+            
+            # Перемещаем в Exceptions
+            target_dir = move_unit_to_target(
+                unit_dir=unit_path,
+                target_base_dir=target_base_dir,
+                extension=None,
+                dry_run=dry_run,
+            )
+            
+            # Обновляем состояние
+            exception_state_map = {
+                1: UnitState.EXCEPTION_1,
+                2: UnitState.EXCEPTION_2,
+                3: UnitState.EXCEPTION_3,
+            }
+            new_state = exception_state_map.get(current_cycle, UnitState.EXCEPTION_1)
+            
+            update_unit_state(
+                unit_path=target_dir,
+                new_state=new_state,
+                cycle=current_cycle,
+                operation={
+                    "type": "convert",
+                    "status": "skipped",
+                    "reason": "no_processable_files",
+                },
+            )
+            
             return {
                 "unit_id": unit_id,
                 "files_converted": 0,
                 "files_failed": 0,
                 "converted_files": [],
                 "errors": [{"error": "No files found that require conversion"}],
-                "moved_to": str(unit_path),  # Остается на месте
+                "moved_to": str(target_dir),
             }
 
         converted_files = []
@@ -157,6 +200,7 @@ class Converter:
                 if manifest:
                     operation = {
                         "type": "convert",
+                        "status": "success",
                         "from": source_format,
                         "to": target_format,
                         "cycle": current_cycle,
@@ -189,18 +233,54 @@ class Converter:
                 errors.append({"file": str(file_path), "error": str(e)})
                 logger.error(f"Failed to convert {file_path}: {e}")
 
-        # Если не было успешных конвертаций, не перемещаем UNIT
+        # Если не было успешных конвертаций, перемещаем в Exceptions
         if not converted_files and not dry_run:
-            logger.warning(f"No files were successfully converted in unit {unit_id} - unit will not be moved")
-            if manifest:
-                save_manifest(unit_path, manifest)
+            logger.warning(f"No files were successfully converted in unit {unit_id} - moving to Exceptions")
+            
+            # Определяем целевую директорию в Exceptions
+            if protocol_date:
+                data_paths = get_data_paths(protocol_date)
+                exceptions_base = data_paths["exceptions"]
+            else:
+                from ..core.config import EXCEPTIONS_DIR
+                exceptions_base = EXCEPTIONS_DIR
+            
+            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "FailedConversion"
+            
+            # Перемещаем в Exceptions
+            target_dir = move_unit_to_target(
+                unit_dir=unit_path,
+                target_base_dir=target_base_dir,
+                extension=None,
+                dry_run=dry_run,
+            )
+            
+            # Обновляем состояние в EXCEPTION_N
+            exception_state_map = {
+                1: UnitState.EXCEPTION_1,
+                2: UnitState.EXCEPTION_2,
+                3: UnitState.EXCEPTION_3,
+            }
+            new_state = exception_state_map.get(current_cycle, UnitState.EXCEPTION_1)
+            
+            update_unit_state(
+                unit_path=target_dir,
+                new_state=new_state,
+                cycle=current_cycle,
+                operation={
+                    "type": "convert",
+                    "status": "failed",
+                    "errors": errors,
+                },
+            )
+            
             return {
                 "unit_id": unit_id,
                 "files_converted": 0,
                 "files_failed": len(errors),
                 "converted_files": [],
                 "errors": errors,
-                "moved_to": str(unit_path),  # Остается на месте
+                "moved_to": str(target_dir),
             }
 
         # Сохраняем обновленный manifest

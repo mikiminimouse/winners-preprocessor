@@ -54,22 +54,22 @@ def test_classify_unit_creates_manifest(sample_unit_dir):
     classifier = Classifier()
     result = classifier.classify_unit(sample_unit_dir, cycle=1)
     
-    # Проверяем, что manifest создан
-    assert manifest_path.exists()
+    # Проверяем, что UNIT перемещен и manifest создан в новой локации
+    moved_to = Path(result["moved_to"])
+    new_manifest_path = moved_to / "manifest.json"
     
-    # Проверяем, что UNIT перемещен
-    assert "target_directory" in result
-    assert Path(result["target_directory"]).exists()
+    assert new_manifest_path.exists()
+    assert moved_to.exists()
 
 
-def test_classify_unit_updates_state(sample_unit_dir):
+def test_classify_unit_updates_state(sample_archive_unit):
     """Тест обновления state machine при классификации."""
     classifier = Classifier()
-    result = classifier.classify_unit(sample_unit_dir, cycle=1)
+    result = classifier.classify_unit(sample_archive_unit, cycle=1)
     
     # Проверяем, что state обновлен
     from docprep.core.manifest import load_manifest
-    target_dir = Path(result["target_directory"])
+    target_dir = Path(result["moved_to"])
     manifest = load_manifest(target_dir)
     
     assert manifest["state_machine"]["current_state"] == UnitState.CLASSIFIED_1.value

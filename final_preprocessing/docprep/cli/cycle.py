@@ -46,7 +46,12 @@ def cycle_run(
     cycle_paths = get_cycle_paths(cycle_num, processing_base, merge_base, exceptions_base)
     
     if not input_dir:
-        input_dir = data_paths["input"] if cycle_num == 1 else cycle_paths["processing"]
+        if cycle_num == 1:
+            input_dir = data_paths["input"]
+        else:
+            # Для циклов 2 и 3 входными данными являются результаты Merge предыдущего цикла
+            prev_cycle_paths = get_cycle_paths(cycle_num - 1, processing_base, merge_base, exceptions_base)
+            input_dir = prev_cycle_paths["merge"]
     
     if not pending_dir:
         pending_dir = cycle_paths["processing"]
@@ -214,4 +219,8 @@ def cycle_process(
         verbose=verbose,
         dry_run=dry_run,
     )
+
+
+if __name__ == "__main__":
+    app()
 

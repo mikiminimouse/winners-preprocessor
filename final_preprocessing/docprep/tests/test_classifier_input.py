@@ -66,8 +66,10 @@ def test_classify_unit_in_input_updates_state(sample_unit_dir_in_input):
     classifier = Classifier()
     result = classifier.classify_unit(sample_unit_dir_in_input, cycle=1)
     
-    # Проверяем, что state обновлен в исходной директории (при copy_mode)
-    manifest = load_manifest(sample_unit_dir_in_input)
+    # Проверяем, что state обновлен в ЦЕЛЕВОЙ директории (копии)
+    # Исходный manifest остается в RAW, так как мы копируем
+    moved_to = Path(result["moved_to"])
+    manifest = load_manifest(moved_to)
     
     assert manifest is not None
     assert "state_machine" in manifest

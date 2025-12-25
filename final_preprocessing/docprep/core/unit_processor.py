@@ -119,90 +119,128 @@ def get_extension_subdirectory(
     Returns:
         Имя поддиректории (без точки) или None
     """
-    # Используем classification если доступен
+    # Если есть classification, обновляем параметры
     if classification:
         detected_type = classification.get("detected_type", detected_type)
         original_extension = classification.get("original_extension", original_extension)
-        has_false_extension = classification.get("has_false_extension", False)
-
-    # Определяем расширение для сортировки
-    def get_extension_for_sorting():
-        if not detected_type:
-            return None
-
-        # Для fake_doc используем detected_type
-        if classification and classification.get("is_fake_doc"):
-            return detected_type.replace("_archive", "")
-
-        # Если есть ложное расширение, используем detected_type
-        if classification and has_false_extension:
-            return detected_type.replace("_archive", "")
-
-        # Для архивов убираем суффикс "_archive"
-        if detected_type.endswith("_archive"):
-            return detected_type.replace("_archive", "")
-
-        # Используем detected_type
-        return detected_type
 
     if category == "direct":
-        return get_extension_for_sorting()
-
+        return _get_extension_for_direct(classification, detected_type)
     elif category == "normalize":
-        # Для normalize используем исходное расширение, если оно есть и корректное
-        # Это важно, так как detected_type может быть неправильным
-        if original_extension:
-            ext = original_extension.lstrip(".").lower()
-            # Нормализуем jpeg -> jpg
-            if ext == "jpeg":
-                ext = "jpg"
-            # Проверяем, что это поддерживаемое расширение для normalize
-            normalize_extensions = {"docx", "pdf", "xlsx", "pptx", "rtf", "jpg", "jpeg", "png", "tiff", "xml", "txt", "doc"}
-            if ext in normalize_extensions:
-                return ext
-        # Если original_extension не передан или не поддерживается, используем detected_type
-        if detected_type:
-            # Нормализуем jpeg -> jpg
-            normalized = detected_type.replace("_archive", "")
-            if normalized == "jpeg":
-                normalized = "jpg"
-            return normalized
-        return None
-
+        return _get_extension_for_normalize(detected_type, original_extension)
     elif category == "convert":
-        # Для convert ВСЕГДА используем исходное расширение файла, а не detected_type
-        # Это важно, так как detected_type может быть неправильным (например, doc определяется как xls)
-        if original_extension:
-            ext = original_extension.lstrip(".")
-            return ext if ext else None
-        # Если original_extension не передан, пытаемся получить из classification
-        if classification:
-            file_path = classification.get("file_path")
-            if file_path:
-                from pathlib import Path
-                ext = Path(file_path).suffix.lower().lstrip(".")
-                return ext if ext else None
-        # Fallback: используем detected_type только если нет другого выбора
-        return detected_type.replace("_archive", "") if detected_type else None
-
+        return _get_extension_for_convert(classification, detected_type, original_extension)
     elif category == "extract":
-        # Для архивов ВСЕГДА используем исходное расширение файла
-        # Это важно, так как detected_type может быть неправильным
-        if original_extension:
-            ext = original_extension.lstrip(".").lower()
-            # Проверяем, что это действительно архив
-            archive_extensions = {"zip", "rar", "7z"}
-            if ext in archive_extensions:
-                return ext
-        # Если original_extension не передан или не архив, используем detected_type
-        if detected_type:
-            archive_type_map = {
-                "zip_archive": "zip",
-                "rar_archive": "rar",
-                "7z_archive": "7z",
-            }
-            return archive_type_map.get(detected_type, detected_type.replace("_archive", ""))
+        return _get_extension_for_extract(detected_type, original_extension)
+    
+    return None
+
+
+def _get_extension_for_direct(
+    classification: Optional[Dict[str, Any]], 
+    detected_type: Optional[str]
+) -> Optional[str]:
+    """Стратегия определения расширения для категории Direct."""
+    if not detected_type:
         return None
+
+    # Для fake_doc используем detected_type
+    if classification and classification.get("is_fake_doc"):
+        return detected_type.replace("_archive", "")
+
+    # Если есть ложное расширение, используем detected_type
+    if classification and classification.get("has_false_extension"):
+        return detected_type.replace("_archive", "")
+
+    # Для архивов убираем суффикс "_archive"
+    if detected_type.endswith("_archive"):
+        return detected_type.replace("_archive", "")
+
+    return detected_type
+
+
+def _get_extension_for_normalize(
+    detected_type: Optional[str], 
+    original_extension: Optional[str]
+) -> Optional[str]:
+    """
+    Стратегия определения расширения для категории Normalize.
+    Приоритет: Original Extension (если валидное) -> Detected Type.
+    """
+    # 1. Проверяем Original Extension
+    if original_extension:
+        ext = original_extension.lstrip(".").lower()
+        if ext == "jpeg":
+            ext = "jpg"
+        
+        # Список поддерживаемых для нормализации расширений
+        NORMALIZE_EXTENSIONS = {
+            "docx", "pdf", "xlsx", "pptx", "rtf", "jpg", 
+            "jpeg", "png", "tiff", "xml", "txt", "doc"
+        }
+        if ext in NORMALIZE_EXTENSIONS:
+            return ext
+
+    # 2. Fallback на Detected Type
+    if detected_type:
+        normalized = detected_type.replace("_archive", "")
+        if normalized == "jpeg":
+           normalized = "jpg"
+        return normalized
+
+    return None
+
+
+def _get_extension_for_convert(
+    classification: Optional[Dict[str, Any]],
+    detected_type: Optional[str], 
+    original_extension: Optional[str]
+) -> Optional[str]:
+    """
+    Стратегия определения расширения для категории Convert.
+    Приоритет: Original Extension -> Classification Path -> Detected Type.
+    """
+    # 1. Original Extension (наивысший приоритет для конвертации)
+    if original_extension:
+        ext = original_extension.lstrip(".")
+        return ext if ext else None
+
+    # 2. Получение из пути в классификации
+    if classification:
+        file_path = classification.get("file_path")
+        if file_path:
+            ext = Path(file_path).suffix.lower().lstrip(".")
+            if ext:
+                return ext
+
+    # 3. Fallback на Detected Type
+    if detected_type:
+        return detected_type.replace("_archive", "")
+    
+    return None
+
+
+def _get_extension_for_extract(
+    detected_type: Optional[str], 
+    original_extension: Optional[str]
+) -> Optional[str]:
+    """
+    Стратегия определения расширения для категории Extract (Архивы).
+    """
+    # 1. Original Extension (для архивов важно)
+    if original_extension:
+        ext = original_extension.lstrip(".").lower()
+        if ext in {"zip", "rar", "7z"}:
+            return ext
+
+    # 2. Detected Type
+    if detected_type:
+        archive_map = {
+            "zip_archive": "zip",
+            "rar_archive": "rar",
+            "7z_archive": "7z",
+        }
+        return archive_map.get(detected_type, detected_type.replace("_archive", ""))
 
     return None
 

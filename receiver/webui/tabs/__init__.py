@@ -1,3 +1,0 @@
-"""
-WebUI Tabs Package
-"""

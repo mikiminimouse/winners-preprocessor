@@ -23,6 +23,7 @@ from ..core.config import (
 )
 from ..utils.file_ops import detect_file_type
 from ..utils.paths import get_unit_files
+from ..core.manifest import _determine_route_from_files, save_manifest, load_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,24 @@ class Classifier:
     def __init__(self):
         """Инициализирует Classifier."""
         self.audit_logger = get_audit_logger()
+
+    def _update_manifest_route(self, target_dir: Path, route: str) -> None:
+        """Обновляет route в manifest целевой директории."""
+        try:
+            manifest_path = target_dir / "manifest.json"
+            if manifest_path.exists():
+                manifest = load_manifest(target_dir)
+                current_route = manifest.get("processing", {}).get("route")
+                
+                # Обновляем только если route изменился или отсутствует
+                if current_route != route:
+                    if "processing" not in manifest:
+                        manifest["processing"] = {}
+                    manifest["processing"]["route"] = route
+                    save_manifest(target_dir, manifest)
+                    logger.debug(f"Updated route to '{route}' for unit in {target_dir}")
+        except Exception as e:
+            logger.warning(f"Failed to update manifest route in {target_dir}: {e}")
 
     def classify_unit(
         self,
@@ -264,6 +283,7 @@ class Classifier:
         file_classifications = []
         categories = []
         classifications_by_file = []
+        manifest_files = []
 
         for file_path in files:
             classification = self._classify_file(file_path)
@@ -275,6 +295,17 @@ class Classifier:
             )
             classifications_by_file.append(classification)
             categories.append(classification["category"])
+            
+            # Подготавливаем информацию для manifest/route
+            detection = detect_file_type(file_path)
+            manifest_files.append({
+                "original_name": file_path.name,
+                "current_name": file_path.name,
+                "mime_type": classification.get("mime_type", detection.get("mime_type", "")),
+                "detected_type": classification.get("detected_type", "unknown"),
+                "needs_ocr": detection.get("needs_ocr", False),
+                "transformations": [],
+            })
 
         # Определяем категорию UNIT
         category_counts = Counter(categories)
@@ -288,26 +319,25 @@ class Classifier:
         unique_types = set(detected_types)
         is_mixed_by_type = len(unique_types) > 1
         
-        # UNIT считается mixed, если:
-        # 1. Файлы имеют разные категории обработки, ИЛИ
-        # 2. Файлы имеют разные типы (даже если категории одинаковые)
+        # UNIT считается mixed, если файлы имеют разные категории или типы
         is_mixed = is_mixed_by_category or is_mixed_by_type
 
         # Определяем доминирующую категорию
         if is_mixed:
-            # Mixed units идут в Exceptions
             unit_category = "mixed"
         elif categories:
             unit_category = categories[0]
         else:
             unit_category = "unknown"
 
+        # Предварительно вычисляем route для обновления старых манифестов
+        current_route = _determine_route_from_files(manifest_files)
+
         # Определяем расширение для сортировки на основе первой классификации
         extension = None
         if classifications_by_file and files:
             first_classification = classifications_by_file[0]
             first_file = files[0]
-            # Передаем original_extension из файла
             original_ext = first_file.suffix.lower()
             extension = get_extension_subdirectory(
                 category=unit_category,
@@ -326,14 +356,11 @@ class Classifier:
         # Обрабатываем случай direct в циклах 2-3 (UNIT уже обработан, готов к merge)
         if unit_category == "direct" and cycle > 1:
             # UNIT уже обработан и готов к merge - переводим в MERGED_PROCESSED
-            # Не перемещаем UNIT, оставляем в текущем Merge_N или переводим в Ready2Docling
             from ..core.state_machine import UnitStateMachine
             state_machine = UnitStateMachine(unit_id, manifest_path)
             current_state = state_machine.get_current_state()
             
             if current_state == UnitState.CLASSIFIED_2:
-                # UNIT готов к merge - переводим в MERGED_PROCESSED
-                # Оставляем UNIT в текущем месте (Merge_1) или перемещаем в Ready2Docling
                 from ..core.config import get_data_paths, READY2DOCLING_DIR
                 if protocol_date:
                     data_paths = get_data_paths(protocol_date)
@@ -341,7 +368,7 @@ class Classifier:
                 else:
                     ready_base = READY2DOCLING_DIR
                 
-                # Перемещаем в Ready2Docling с учетом расширения
+                # Перемещаем в Ready2Docling
                 target_dir = move_unit_to_target(
                     unit_dir=unit_path,
                     target_base_dir=ready_base,
@@ -351,6 +378,9 @@ class Classifier:
                 )
                 
                 if not dry_run:
+                    # Обновляем route
+                    self._update_manifest_route(target_dir, current_route)
+
                     # Сначала переводим в MERGED_PROCESSED, затем в READY_FOR_DOCLING
                     update_unit_state(
                         unit_path=target_dir,
@@ -358,6 +388,7 @@ class Classifier:
                         cycle=cycle,
                         operation={
                             "type": "classify",
+                            "status": "success",
                             "category": unit_category,
                             "ready_for_docling": True,
                             "file_count": len(files),
@@ -370,6 +401,7 @@ class Classifier:
                         cycle=cycle,
                         operation={
                             "type": "classify",
+                            "status": "success",
                             "category": unit_category,
                             "ready_for_docling": True,
                             "file_count": len(files),
@@ -408,19 +440,6 @@ class Classifier:
 
         # Создаем manifest если его нет
         if not manifest:
-            # Подготавливаем информацию о файлах для manifest
-            manifest_files = []
-            for file_path, classification in zip(files, classifications_by_file):
-                detection = detect_file_type(file_path)
-                manifest_files.append({
-                    "original_name": file_path.name,
-                    "current_name": file_path.name,
-                    "mime_type": detection.get("mime_type", ""),
-                    "detected_type": classification.get("detected_type", "unknown"),
-                    "needs_ocr": detection.get("needs_ocr", False),
-                    "transformations": [],
-                })
-
             manifest = create_unit_manifest_if_needed(
                 unit_path=unit_path,
                 unit_id=unit_id,
@@ -429,6 +448,26 @@ class Classifier:
                 files=manifest_files,
                 cycle=cycle,
             )
+        else:
+            # Обогащаем существующий манифест метаданными файлов (ВАЖНО для Mixed Units)
+            manifest["files_metadata"] = {
+                f.get("original_name", ""): {
+                    "detected_type": f.get("detected_type", "unknown"),
+                    "needs_ocr": f.get("needs_ocr", False),
+                    "mime_type": f.get("mime_detected", f.get("mime_type", "unknown")),
+                    "pages_or_parts": f.get("pages_or_parts", 1),
+                }
+                for f in manifest_files
+            }
+            
+            # Обновляем route в существующем манифесте
+            if "processing" not in manifest:
+                manifest["processing"] = {}
+            manifest["processing"]["route"] = current_route
+            
+            # Сохраняем обновленный манифест перед перемещением
+            if not dry_run:
+                save_manifest(unit_path, manifest)
 
         # Перемещаем UNIT в целевую директорию (с учетом расширения)
         if unit_category == "direct" and cycle == 1:
@@ -440,21 +479,10 @@ class Classifier:
                 dry_run=dry_run,
                 copy_mode=copy_mode,
             )
-            # Обновляем state сначала на CLASSIFIED_1, затем на MERGED_DIRECT
+            # Обновляем state сразу на MERGED_DIRECT
             if not dry_run:
-                # Сначала переходим в CLASSIFIED_1
-                update_unit_state(
-                    unit_path=target_dir,
-                    new_state=UnitState.CLASSIFIED_1,
-                    cycle=cycle,
-                    operation={
-                        "type": "classify",
-                        "category": unit_category,
-                        "direct_to_merge_0": True,
-                        "file_count": len(files),
-                    },
-                )
-                # Затем сразу в MERGED_DIRECT
+                self._update_manifest_route(target_dir, current_route)
+
                 update_unit_state(
                     unit_path=target_dir,
                     new_state=UnitState.MERGED_DIRECT,
@@ -469,17 +497,15 @@ class Classifier:
                 new_state = UnitState.MERGED_DIRECT
             else:
                 new_state = UnitState.MERGED_DIRECT
-        elif unit_category in ["special", "mixed", "unknown"]:
-            # Для special, mixed и unknown используем subcategory как поддиректорию
+        elif unit_category in ["special", "unknown"]:
+            # Для special и unknown используем subcategory как поддиректорию
             if unit_category == "unknown":
                 # Unknown файлы идут в Ambiguous
                 subcategory = "Ambiguous"
-            elif unit_category == "mixed":
-                subcategory = "Mixed"
             else:
                 subcategory = "Special"
             
-            # Проверяем, есть ли ambiguous файлы (для mixed и special)
+            # Проверяем, есть ли ambiguous файлы (для special)
             if unit_category != "unknown":
                 # Проверяем, есть ли ambiguous файлы (по scenario или по classification из Decision Engine)
                 has_ambiguous = any(
@@ -502,7 +528,7 @@ class Classifier:
                 dry_run=dry_run,
                 copy_mode=copy_mode,
             )
-            # Для exceptions (mixed, special, ambiguous, unknown, empty) используем EXCEPTION_N состояния
+            # Для exceptions (special, ambiguous, unknown, empty) используем EXCEPTION_N состояния
             exception_state_map = {
                 1: UnitState.EXCEPTION_1,
                 2: UnitState.EXCEPTION_2,
@@ -533,6 +559,8 @@ class Classifier:
             
             # Обновляем state machine (если не dry_run и состояние изменилось)
             if not dry_run and should_update_state:
+                self._update_manifest_route(target_dir, current_route)
+
                 update_unit_state(
                     unit_path=target_dir,
                     new_state=new_state,
@@ -541,6 +569,66 @@ class Classifier:
                         "type": "classify",
                         "category": unit_category,
                         "is_mixed": is_mixed,
+                        "file_count": len(files),
+                    },
+                )
+        elif unit_category == "mixed":
+            # Для mixed юнитов выбираем приоритетную категорию обработки
+            # Приоритет: extract > convert > normalize > direct
+            priority_order = ["extract", "convert", "normalize", "direct"]
+            chosen_category = "direct"
+            
+            # Проверяем наличие категорий в файлах
+            file_cats = {fc["category"] for fc in classifications_by_file}
+            for cat in priority_order:
+                if cat in file_cats:
+                    chosen_category = cat
+                    break
+            
+            # Определяем целевую базу для выбранной категории
+            target_base_dir = self._get_target_directory_base(chosen_category, cycle, protocol_date)
+            
+            # Если это direct в циклах 2-3, обрабатываем отдельно (уже реализовано выше для unit_category == "direct")
+            # Но для простоты в mixed мы просто направляем в соответствующую директорию
+            
+            target_dir = move_unit_to_target(
+                unit_dir=unit_path,
+                target_base_dir=target_base_dir,
+                extension=extension,
+                dry_run=dry_run,
+                copy_mode=copy_mode,
+            )
+            
+            # Определяем новое состояние на основе выбранной категории
+            if cycle == 1:
+                if chosen_category == "direct":
+                    new_state = UnitState.MERGED_DIRECT
+                else:
+                    new_state = UnitState.CLASSIFIED_1
+            elif cycle == 2:
+                # В цикле 2 mixed может идти либо в CLASSIFIED_2 (если требует еще обработки),
+                # либо в MERGED_PROCESSED (если это финальная стадия)
+                # По умолчанию - CLASSIFIED_2, если это convert/extract/normalize
+                if chosen_category in ["convert", "extract", "normalize"]:
+                    new_state = UnitState.CLASSIFIED_2
+                else:
+                    new_state = UnitState.MERGED_PROCESSED
+            else:
+                new_state = UnitState.MERGED_PROCESSED
+                
+            if not dry_run:
+                self._update_manifest_route(target_dir, current_route)
+                
+                update_unit_state(
+                    unit_path=target_dir,
+                    new_state=new_state,
+                    cycle=cycle,
+                    operation={
+                        "type": "classify",
+                        "status": "success",
+                        "category": "mixed",
+                        "chosen_route_category": chosen_category,
+                        "is_mixed": True,
                         "file_count": len(files),
                     },
                 )
@@ -598,6 +686,8 @@ class Classifier:
             
             # Обновляем state machine (если не dry_run)
             if not dry_run:
+                self._update_manifest_route(target_dir, current_route)
+
                 update_unit_state(
                     unit_path=target_dir,
                     new_state=new_state,
@@ -664,6 +754,7 @@ class Classifier:
         classification = {
             "category": "unknown",
             "detected_type": detection.get("detected_type", "unknown"),
+            "mime_type": detection.get("mime_type", ""),
             "original_extension": extension,  # Сохраняем исходное расширение для сортировки
             "needs_conversion": False,
             "needs_extraction": False,

@@ -1,4 +1,0 @@
-"""
-Тесты для docling pipeline.
-"""
-

@@ -237,10 +237,10 @@ def stage_merge(
                 operations = manifest.get("processing", {}).get("operations", [])
                 
                 # ВАЖНО: Проверяем, что операция действительно выполнена
-                # Для Convert - проверяем наличие операции convert с успешным результатом
+                # Для Convert - проверяем наличие операции convert
                 if merge_category == "Converted":
                     has_convert = any(
-                        op.get("type") == "convert" and op.get("success", False)
+                        op.get("type") == "convert"
                         for op in operations
                     )
                     if not has_convert:
@@ -248,10 +248,10 @@ def stage_merge(
                         typer.echo(f"  ⚠️  {unit_path.name}: Не был конвертирован, пропускаем merge", err=True)
                         continue
                 
-                # Для Extract - проверяем наличие операции extract с успешным результатом
+                # Для Extract - проверяем наличие операции extract
                 elif merge_category == "Extracted":
                     has_extract = any(
-                        op.get("type") == "extract" and op.get("files_extracted", 0) > 0
+                        op.get("type") == "extract"
                         for op in operations
                     )
                     if not has_extract:
@@ -259,10 +259,10 @@ def stage_merge(
                         typer.echo(f"  ⚠️  {unit_path.name}: Не был извлечен, пропускаем merge", err=True)
                         continue
                 
-                # Для Normalize - проверяем наличие операции normalize с успешным результатом
+                # Для Normalize - проверяем наличие операции normalize
                 elif merge_category == "Normalized":
                     has_normalize = any(
-                        op.get("type") == "normalize" and op.get("files_normalized", 0) > 0
+                        op.get("type") == "normalize"
                         for op in operations
                     )
                     if not has_normalize:

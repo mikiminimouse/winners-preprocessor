@@ -57,6 +57,17 @@ def test_extractor_extracts_zip(temp_dir):
         zf.writestr("file1.txt", "Content 1")
         zf.writestr("file2.txt", "Content 2")
     
+    # Создаем manifest
+    from docprep.core.manifest import create_manifest_v2, save_manifest
+    from docprep.core.state_machine import UnitState
+    manifest = create_manifest_v2(
+        unit_id=unit_path.name,
+        files=[{"current_name": "test.zip", "detected_type": "zip_archive"}],
+        current_cycle=1,
+        state_trace=[UnitState.PENDING_EXTRACT.value],
+    )
+    save_manifest(unit_path, manifest)
+    
     extractor = Extractor()
     result = extractor.extract_unit(
         unit_path=unit_path,
