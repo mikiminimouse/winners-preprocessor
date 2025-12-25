@@ -1,0 +1,23 @@
+========================================
+ANALYSIS REPORT: Data/2025-03-18
+========================================
+Total Input Units: 2585
+Total Successfully Processed: 655
+Total Exceptions: 909
+--------------------
+Processed by Route/Format:
+  docx: 338
+  pdf_scan: 193
+  pdf_text: 124
+--------------------
+Exceptions by Category:
+  Mixed: 128
+  Empty: 781
+--------------------
+Leftovers (Should be 0):
+  Processing: 157
+  Merge: 1519
+========================================
+Input vs Output Delta: 1021 (Positive means lost units, Negative means duplicates/extras)
+
+❌ FAIL: Leftovers found in intermediate directories!

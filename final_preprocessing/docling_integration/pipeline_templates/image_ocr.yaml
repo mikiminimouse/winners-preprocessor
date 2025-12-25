@@ -1,0 +1,24 @@
+# Pipeline template for image_ocr route
+# Image files (JPG, PNG, TIFF) requiring OCR
+# Performance: ~60-100 images/hour/CPU
+
+route: image_ocr
+
+models:
+  ocr: tesseract
+  layout: none
+
+performance:
+  threads: 4
+  dpi: 300
+
+docling:
+  force_ocr: true
+  language: eng
+  extract_tables: true  # Attempt to extract tables from images
+
+processing_constraints:
+  allow_gpu: false
+  max_runtime_sec: 180
+  max_memory_mb: 4096
+

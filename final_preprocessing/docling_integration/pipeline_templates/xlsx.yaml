@@ -1,0 +1,24 @@
+# Pipeline template for xlsx route
+# Microsoft Excel spreadsheets (native format)
+# Performance: ~80-150 docs/hour/CPU
+
+route: xlsx
+
+models:
+  layout: native
+  tables: native
+  ocr: off
+
+performance:
+  threads: 4
+
+docling:
+  extract_tables: true
+  normalize_cells: true
+  do_caption_mentions: true
+
+processing_constraints:
+  allow_gpu: false
+  max_runtime_sec: 60
+  max_memory_mb: 2048
+

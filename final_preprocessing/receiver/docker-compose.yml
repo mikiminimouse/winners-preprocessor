@@ -1,0 +1,278 @@
+version: "3.9"
+
+services:
+  # Granite API Adapter - адаптер между Docling и удаленным Granite-Docling API
+  # NOTE: Этот сервис устарел, см. archive/granite/
+  # granite_adapter:
+  #   build:
+  #     context: ../archive/granite/granite_adapter
+  #     dockerfile: Dockerfile
+    container_name: granite_adapter
+    restart: unless-stopped
+    environment:
+      - GRANITE_API_URL=https://8cb66180-db3a-4963-8068-51f87e716259.modelrun.inference.cloud.ru/v1
+      - GRANITE_API_TOKEN=ZDRhOWQ3OTAtZjU4MC00MzA2LThhNTgtMDU1NGFlMjE4OWRl.85a830f9340966e0ad1fd1642884c7c8
+      - GRANITE_MODEL=granite-docling
+      - GRANITE_MAX_TOKENS=8000
+      - GRANITE_TEMPERATURE=0.0
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Основной Docling API + OCR (используем Docling OCR как основной)
+  # NOTE: Docling устарел, используйте OCR_VL сервис вместо этого
+  # docling:
+  #   build:
+  #     context: ../archive/docling
+  #     dockerfile: Dockerfile
+    container_name: docling
+    restart: unless-stopped
+    depends_on:
+      granite_adapter:
+        condition: service_healthy
+      router:
+        condition: service_started
+    environment:
+      - DOC_PATH=/data/input
+      - OUT_PATH=/data/output
+      - OCR_ENGINE=docling
+      - OCR_THREADS=2
+      - LAYOUT_ENABLED=true
+      - TABLE_ENABLED=true
+      - PYTHONUNBUFFERED=1
+      - MONGO_SERVER=${MONGO_SERVER:-mongodb:27017}
+      - MONGO_METADATA_USER=${MONGO_METADATA_USER:-docling_user}
+      - MONGO_METADATA_PASSWORD=${MONGO_METADATA_PASSWORD:-password}
+      - MONGO_METADATA_DB=${MONGO_METADATA_DB:-docling_metadata}
+      - DEFAULT_TIMEOUT=${DEFAULT_TIMEOUT:-300}
+      - MAX_PARALLEL_WORKERS=${MAX_PARALLEL_WORKERS:-2}
+      - PARALLEL_ENABLED=${PARALLEL_ENABLED:-true}
+    volumes:
+      - ../data/input:/data/input:ro
+      - ../data/output:/data/output
+      - ../data/temp:/data/temp
+      - ../data/normalized:/data/normalized:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # LibreOffice headless для конвертации .doc -> .docx
+  libreoffice:
+    image: lscr.io/linuxserver/libreoffice:latest
+    container_name: libreoffice
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Moscow
+    volumes:
+      - ../data/temp:/data/temp
+      - ../data/input:/data/input
+      - ../data/normalized:/data/normalized
+    command: >
+      bash -c "
+      while true; do
+        sleep 5;
+        find /data/input /data/normalized -name '*.doc' -type f -mmin +0.1 2>/dev/null | while read file; do
+          if [ ! -f \"$${file%.doc}.docx\" ]; then
+            echo \"Converting: $$file\";
+            soffice --headless --convert-to docx --outdir \"$$(dirname \"$$file\")\" \"$$file\" 2>&1;
+            if [ $$? -eq 0 ]; then
+              echo \"Converted: $${file%.doc}.docx\";
+            fi;
+          fi;
+        done;
+      done
+      "
+    healthcheck:
+      test: ["CMD", "which", "soffice"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+
+  # Router — прием файлов, классификация, триггер обработки (FastAPI)
+  router:
+    build:
+      context: ./router
+      dockerfile: Dockerfile
+    container_name: router
+    restart: unless-stopped
+    environment:
+      - INPUT_DIR=/app/input
+      - TEMP_DIR=/app/temp
+      - OUTPUT_DIR=/app/output
+      - EXTRACTED_DIR=/app/extracted
+      - NORMALIZED_DIR=/app/normalized
+      - ARCHIVE_DIR=/app/archive
+      - DOCLING_API=http://docling:8000/process
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-change-me-secret}
+      - LOG_LEVEL=INFO
+      - MAX_UNPACK_SIZE_MB=500
+      - MAX_FILES_IN_ARCHIVE=1000
+      # MongoDB конфигурация для чтения протоколов
+      - MONGO_SERVER=${MONGO_SERVER:-mongodb:27017}
+      - MONGO_USER=${MONGO_USER:-readonly_user}
+      - MONGO_PASSWORD=${MONGO_PASSWORD:-password}
+      - MONGO_SSL_CERT=${MONGO_SSL_CERT:-}
+      - MONGO_PROTOCOLS_DB=${MONGO_PROTOCOLS_DB:-protocols223}
+      - MONGO_PROTOCOLS_COLLECTION=${MONGO_PROTOCOLS_COLLECTION:-purchaseProtocol}
+      # MongoDB конфигурация для записи метаданных
+      - MONGO_METADATA_USER=${MONGO_METADATA_USER:-docling_user}
+      - MONGO_METADATA_PASSWORD=${MONGO_METADATA_PASSWORD:-password}
+      - MONGO_METADATA_DB=${MONGO_METADATA_DB:-docling_metadata}
+      - MONGO_METADATA_COLLECTION=${MONGO_METADATA_COLLECTION:-manifests}
+      - PROTOCOLS_COUNT_LIMIT=${PROTOCOLS_COUNT_LIMIT:-100}
+    volumes:
+      - ../data/input:/app/input
+      - ../data/temp:/app/temp
+      - ../data/output:/app/output
+      - ../data/temp:/app/extracted
+      - ../data/normalized:/app/normalized
+      - ../data/archive:/app/archive
+      # Монтируем SSL сертификат MongoDB (если используется)
+      - ${MONGO_SSL_CERT_PATH:-./certs}:/app/certs:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  # Scheduler — cron-like (APScheduler) вызывает router/process (автозапуск)
+  scheduler:
+    build:
+      context: ./scheduler
+      dockerfile: Dockerfile
+    container_name: scheduler
+    restart: unless-stopped
+    depends_on:
+      - router
+    environment:
+      - ROUTER_API=http://router:8080/process_now
+      - SCHEDULE_CRON=${SCHEDULE_CRON:-*/15 * * * *}
+      - LOG_LEVEL=INFO
+    volumes:
+      - ../data/temp:/app/temp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+
+  # CLI для тестирования препроцессинга (интерактивный режим)
+  cli:
+    build:
+      context: ./router
+      dockerfile: Dockerfile
+    container_name: preprocessing_cli
+    restart: "no"  # Не перезапускаем автоматически
+    depends_on:
+      - router
+      - mongodb
+    environment:
+      - INPUT_DIR=/app/input
+      - TEMP_DIR=/app/temp
+      - OUTPUT_DIR=/app/output
+      - EXTRACTED_DIR=/app/extracted
+      - NORMALIZED_DIR=/app/normalized
+      - ARCHIVE_DIR=/app/archive
+      - DOCLING_API=http://docling:8000/process
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-change-me-secret}
+      - LOG_LEVEL=INFO
+      - MAX_UNPACK_SIZE_MB=500
+      - MAX_FILES_IN_ARCHIVE=1000
+      # MongoDB конфигурация для чтения протоколов
+      - MONGO_SERVER=${MONGO_SERVER:-mongodb:27017}
+      - MONGO_USER=${MONGO_USER:-readonly_user}
+      - MONGO_PASSWORD=${MONGO_PASSWORD:-password}
+      - MONGO_SSL_CERT=${MONGO_SSL_CERT:-}
+      - MONGO_PROTOCOLS_DB=${MONGO_PROTOCOLS_DB:-protocols223}
+      - MONGO_PROTOCOLS_COLLECTION=${MONGO_PROTOCOLS_COLLECTION:-purchaseProtocol}
+      # MongoDB конфигурация для записи метаданных
+      - MONGO_METADATA_USER=${MONGO_METADATA_USER:-docling_user}
+      - MONGO_METADATA_PASSWORD=${MONGO_METADATA_PASSWORD:-password}
+      - MONGO_METADATA_DB=${MONGO_METADATA_DB:-docling_metadata}
+      - MONGO_METADATA_COLLECTION=${MONGO_METADATA_COLLECTION:-manifests}
+      - MONGO_METRICS_COLLECTION=${MONGO_METRICS_COLLECTION:-processing_metrics}
+      - PROTOCOLS_COUNT_LIMIT=${PROTOCOLS_COUNT_LIMIT:-100}
+    volumes:
+      - ../data/input:/app/input
+      - ../data/temp:/app/temp
+      - ../data/output:/app/output
+      - ../data/temp:/app/extracted
+      - ../data/normalized:/app/normalized
+      - ../data/archive:/app/archive
+      # Монтируем SSL сертификат MongoDB (если используется)
+      - ${MONGO_SSL_CERT_PATH:-./certs}:/app/certs:ro
+    command: ["python", "/app/cli.py"]
+    stdin_open: true
+    tty: true
+
+  # PostgreSQL для хранения метаданных (опционально, для больших объемов)
+  postgres:
+    image: postgres:15-alpine
+    container_name: postling_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=docling_meta
+      - POSTGRES_USER=docling
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me-password}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docling"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# Добавляем MongoDB сервис
+  mongodb:
+    image: mongo:5.0
+    container_name: docling_mongodb
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    volumes:
+      - mongodb_data:/data/db
+      # NOTE: mongo-init устарел и перемещен в archive/mongo-init/
+      # Скрипт создавал неправильные коллекции (manifests вместо protocols)
+      # и не соответствует текущей архитектуре receiver
+      # Для локальной разработки можно использовать архивную версию из archive/mongo-init/
+      # - ./mongo-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  # Добавляем volume для MongoDB
+  mongodb_data:
+
+# Исправляем networks секцию
+networks:
+  default:
+    name: docling_network
+

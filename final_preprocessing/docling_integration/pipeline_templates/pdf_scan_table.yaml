@@ -1,0 +1,27 @@
+# Pipeline template for pdf_scan_table route
+# PDF documents with scanned content + tables (heaviest workload)
+# Performance: ~4-8 PDF/hour/CPU
+
+route: pdf_scan_table
+
+models:
+  ocr: tesseract
+  layout: publaynet_detectron2
+  tables: cascadetabnet
+
+performance:
+  threads: 8
+  dpi: 300
+
+docling:
+  force_ocr: true
+  extract_tables: true
+  normalize_cells: true
+  do_caption_mentions: true
+  extract_figures: true
+
+processing_constraints:
+  allow_gpu: false
+  max_runtime_sec: 600
+  max_memory_mb: 8192
+

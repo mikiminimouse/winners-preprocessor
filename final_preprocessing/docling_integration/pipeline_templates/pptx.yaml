@@ -1,0 +1,26 @@
+route: pptx
+
+models:
+  layout: native
+  tables: native
+  ocr: off
+
+performance:
+  threads: 4
+
+docling:
+  parse_text: true
+  extract_tables: true
+  do_caption_mentions: true
+  do_table_of_contents: true
+  extract_figures: true
+
+language:
+  primary: ru
+  fallback: en
+  encoding: utf-8
+
+processing_constraints:
+  allow_gpu: false
+  max_runtime_sec: 120
+  max_memory_mb: 2048

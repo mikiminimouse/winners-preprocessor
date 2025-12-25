@@ -1,0 +1,26 @@
+# Pipeline template for pdf_scan route
+# PDF documents with scanned content (requires OCR)
+# Performance: ~10-20 PDF/hour/CPU
+
+route: pdf_scan
+
+models:
+  ocr: tesseract
+  layout: docbank
+  tables: off
+
+performance:
+  threads: 6
+  dpi: 300
+
+docling:
+  force_ocr: true
+  language: eng
+  do_caption_mentions: true
+  extract_figures: true
+
+processing_constraints:
+  allow_gpu: false
+  max_runtime_sec: 300
+  max_memory_mb: 4096
+

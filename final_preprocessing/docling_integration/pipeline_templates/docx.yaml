@@ -1,0 +1,26 @@
+# Pipeline template for docx route
+# Microsoft Word documents (native format)
+# Performance: ~100-200 docs/hour/CPU
+
+route: docx
+
+models:
+  layout: native
+  tables: native
+  ocr: off
+
+performance:
+  threads: 4
+
+docling:
+  parse_text: true
+  extract_tables: true
+  do_caption_mentions: true
+  do_table_of_contents: true
+  extract_figures: true
+
+processing_constraints:
+  allow_gpu: false
+  max_runtime_sec: 60
+  max_memory_mb: 2048
+

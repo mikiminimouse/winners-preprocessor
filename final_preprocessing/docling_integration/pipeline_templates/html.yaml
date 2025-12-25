@@ -1,0 +1,25 @@
+# Pipeline template for html route
+# HTML documents (structured format)
+# Performance: ~150-300 docs/hour/CPU
+
+route: html
+
+models:
+  layout: native
+  tables: native
+  ocr: off
+
+performance:
+  threads: 4
+
+docling:
+  parse_text: true
+  extract_tables: true
+  do_caption_mentions: true
+  do_table_of_contents: true
+
+processing_constraints:
+  allow_gpu: false
+  max_runtime_sec: 30
+  max_memory_mb: 1024
+

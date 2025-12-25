@@ -1,0 +1,21 @@
+route: rtf
+
+models:
+  layout: native
+  ocr: off
+
+performance:
+  threads: 4
+
+docling:
+  parse_text: true
+
+language:
+  primary: ru
+  fallback: en
+  encoding: utf-8
+
+processing_constraints:
+  allow_gpu: false
+  max_runtime_sec: 60
+  max_memory_mb: 1024
