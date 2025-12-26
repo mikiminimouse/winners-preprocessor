@@ -17,6 +17,7 @@ from ..core.unit_processor import (
     get_extension_subdirectory,
 )
 from ..core.config import get_cycle_paths, MERGE_DIR, get_data_paths
+from ..core.libreoffice_converter import RobustDocumentConverter
 from ..utils.file_ops import detect_file_type
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ class Converter:
         "doc": "docx",
         "xls": "xlsx",
         "ppt": "pptx",
-        "rtf": "docx",
+        "rtf": "docx",  # RTF конвертируем в DOCX
     }
     
     # Маппинг форматов для LibreOffice (target_format -> LibreOffice format string)
@@ -41,14 +42,26 @@ class Converter:
         "pptx": "pptx",
     }
 
-    def __init__(self, libreoffice_path: str = "libreoffice"):
+    def __init__(self, libreoffice_path: str = "libreoffice", use_headless: bool = False, mock_mode: bool = False):
         """
         Инициализирует Converter.
 
         Args:
             libreoffice_path: Путь к LibreOffice (по умолчанию "libreoffice")
+            use_headless: Использовать headless конвертер (для решения проблем с X11)
+            mock_mode: Режим симуляции для тестирования
         """
         self.libreoffice_path = libreoffice_path
+        self.use_headless = use_headless
+        self.mock_mode = mock_mode
+
+        # Инициализируем headless конвертер если нужно
+        if use_headless:
+            from ..core.libreoffice_converter import RobustDocumentConverter
+            self.headless_converter = RobustDocumentConverter()
+            if mock_mode:
+                self.headless_converter.libreoffice.mock_mode = True
+
         self.audit_logger = get_audit_logger()
 
     def convert_unit(
@@ -245,7 +258,7 @@ class Converter:
                 from ..core.config import EXCEPTIONS_DIR
                 exceptions_base = EXCEPTIONS_DIR
             
-            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "FailedConversion"
+            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "ErConvert"
             
             # Перемещаем в Exceptions
             target_dir = move_unit_to_target(
@@ -415,10 +428,29 @@ class Converter:
         if engine != "libreoffice":
             raise OperationError(f"Unsupported conversion engine: {engine}", operation="convert")
 
+        # Используем headless конвертер если включен
+        if self.use_headless and hasattr(self, 'headless_converter'):
+            logger.info(f"🔄 Using headless converter for {file_path.name}")
+            output_path = self.headless_converter.convert_document(file_path, file_path.parent)
+
+            if output_path and output_path.exists():
+                return {
+                    "original_file": str(file_path),
+                    "output_path": str(output_path),
+                    "source_format": source_format,
+                    "target_format": target_format,
+                    "success": True,
+                }
+            else:
+                raise OperationError(
+                    f"Headless conversion failed for {file_path}",
+                    operation="convert_headless"
+                )
+
         # Определяем формат для LibreOffice
         # LibreOffice использует формат в виде расширения (без точки)
         libreoffice_format = self.LIBREOFFICE_FORMAT_MAP.get(target_format, target_format)
-        
+
         # Определяем выходной путь
         output_dir = file_path.parent
         output_name = file_path.stem + "." + target_format
@@ -501,4 +533,148 @@ class Converter:
                 operation="convert",
                 operation_details={"exception": type(e).__name__},
             )
+
+    def convert_unit_headless(
+        self,
+        unit_path: Path,
+        cycle: int,
+        protocol_date: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Конвертирует UNIT с использованием headless LibreOffice.
+
+        Решает проблему dconf permission denied в headless окружении.
+
+        Args:
+            unit_path: Путь к директории UNIT
+            cycle: Номер цикла
+            protocol_date: Дата протокола
+            dry_run: Режим проверки
+
+        Returns:
+            Результаты конвертации
+        """
+        unit_id = unit_path.name
+        audit_logger = get_audit_logger()
+
+        logger.info(f"🔄 Converting UNIT {unit_id} with headless LibreOffice")
+
+        # Получаем целевую директорию для цикла
+        cycle_paths = get_cycle_paths(cycle)
+        target_base_dir = cycle_paths["merge"]
+
+        # Определяем исходный формат файлов в UNIT
+        unit_files = list(unit_path.glob("*"))
+        if not unit_files:
+            raise OperationError(
+                f"No files found in UNIT {unit_id}",
+                operation="convert_headless",
+            )
+
+        # Инициализируем конвертер
+        doc_converter = RobustDocumentConverter()
+
+        converted_files = []
+        failed_files = []
+        total_converted = 0
+
+        # Обрабатываем каждый файл
+        for file_path in unit_files:
+            if file_path.is_file():
+                file_ext = file_path.suffix.lower()
+
+                # Проверяем, нужно ли конвертировать
+                if file_ext in ['.doc', '.xls', '.ppt', '.rtf']:
+                    logger.info(f"📄 Converting {file_path.name} to PDF")
+
+                    if not dry_run:
+                        try:
+                            # Конвертируем в PDF
+                            output_pdf = doc_converter.convert_document(
+                                file_path,
+                                output_dir=file_path.parent
+                            )
+
+                            if output_pdf:
+                                logger.info(f"✅ Converted {file_path.name} -> {output_pdf.name}")
+
+                                # Удаляем оригинальный файл
+                                try:
+                                    file_path.unlink()
+                                    logger.debug(f"🗑️ Removed original file: {file_path.name}")
+                                except Exception as e:
+                                    logger.warning(f"Failed to remove {file_path.name}: {e}")
+
+                                converted_files.append({
+                                    "original": str(file_path),
+                                    "converted": str(output_pdf),
+                                    "format": f"{file_ext[1:]}->pdf"
+                                })
+
+                                total_converted += 1
+                            else:
+                                logger.error(f"❌ Failed to convert {file_path.name}")
+                                failed_files.append(str(file_path))
+
+                        except Exception as e:
+                            logger.error(f"❌ Conversion error for {file_path.name}: {e}")
+                            failed_files.append(str(file_path))
+                    else:
+                        logger.info(f"[DRY RUN] Would convert {file_path.name} to PDF")
+                        converted_files.append({
+                            "original": str(file_path),
+                            "converted": str(file_path.parent / f"{file_path.stem}.pdf"),
+                            "format": f"{file_ext[1:]}->pdf"
+                        })
+                        total_converted += 1
+
+        # Обновляем manifest
+        try:
+            manifest = load_manifest(unit_path)
+            update_manifest_operation(
+                manifest,
+                "convert_headless",
+                {
+                    "converted_files": converted_files,
+                    "failed_files": failed_files,
+                    "total_converted": total_converted,
+                    "total_failed": len(failed_files)
+                }
+            )
+            save_manifest(unit_path, manifest)
+        except Exception as e:
+            logger.warning(f"Failed to update manifest: {e}")
+
+        # Логируем в audit
+        audit_logger.log_operation(
+            operation="convert_headless",
+            unit_id=unit_id,
+            cycle=cycle,
+            success=total_converted > 0,
+            operation_details={
+                "converted_count": total_converted,
+                "failed_count": len(failed_files),
+                "converted_files": converted_files,
+                "failed_files": failed_files
+            }
+        )
+
+        # Определяем результат
+        success = len(failed_files) == 0 and total_converted > 0
+
+        if success:
+            logger.info(f"✅ UNIT {unit_id} converted successfully ({total_converted} files)")
+        else:
+            logger.warning(f"⚠️ UNIT {unit_id} conversion completed with issues ({len(failed_files)} failed)")
+
+        return {
+            "unit_id": unit_id,
+            "success": success,
+            "converted_files": converted_files,
+            "failed_files": failed_files,
+            "total_converted": total_converted,
+            "total_failed": len(failed_files),
+            "target_directory": str(target_base_dir),
+        }
 

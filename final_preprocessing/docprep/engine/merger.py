@@ -29,7 +29,7 @@ class Merger:
         """
         Перемещает UNIT в директорию исключений с указанием причины.
         """
-        target_base_dir = exceptions_base / reason / f"Cycle_{cycle}"
+        target_base_dir = exceptions_base / f"Exceptions_{cycle}" / reason
         try:
             target_path = move_unit_to_target(source_path, target_base_dir)
             logger.info(f"Unit {unit_id} moved to Exceptions/{reason} due to: {reason}")
@@ -50,11 +50,37 @@ class Merger:
         except Exception as e:
             logger.error(f"Failed to move unit {unit_id} to Exceptions/{reason}: {e}")
 
+    def _move_to_er_merge(self, unit_id: str, source_path: Path, er_merge_base: Path, reason: str, cycle: int):
+        """
+        Перемещает UNIT в директорию ErMerge с указанием причины.
+        """
+        target_base_dir = er_merge_base / f"Cycle_{cycle}"
+        try:
+            target_path = move_unit_to_target(source_path, target_base_dir)
+            logger.info(f"Unit {unit_id} moved to ErMerge/{reason} due to: {reason}")
+            # Обновляем манифест, если он существует
+            manifest_path = target_path / "manifest.json"
+            if manifest_path.exists():
+                update_unit_state(
+                    unit_path=target_path,
+                    new_state=UnitState.MERGER_SKIPPED,
+                    cycle=cycle,
+                    operation={
+                        "type": "merger_error",
+                        "reason": reason,
+                    },
+                    final_cluster=f"ErMerge/{reason}",
+                    final_reason=f"Error during final merge: {reason}",
+                )
+        except Exception as e:
+            logger.error(f"Failed to move unit {unit_id} to ErMerge/{reason}: {e}")
+
     def collect_units(
         self,
         source_dirs: List[Path],
         target_dir: Path,
         cycle: Optional[int] = None,
+        er_merge_base: Optional[Path] = None,
     ) -> Dict[str, Any]:
         """
         Собирает UNIT из нескольких источников в целевую директорию.
@@ -63,6 +89,7 @@ class Merger:
             source_dirs: Список директорий источников (Merge_0/Direct, Merge_1, Merge_2, Merge_3)
             target_dir: Целевая директория (Ready2Docling)
             cycle: Номер цикла (опционально, для фильтрации)
+            er_merge_base: Базовая директория ErMerge (опционально)
 
         Returns:
             Словарь с результатами объединения
@@ -218,7 +245,7 @@ class Merger:
                         has_convert = any(op.get("type") == "convert" for op in operations)
                         if not has_convert:
                             # Файл требует конвертации, но операция не выполнена
-                            self._move_skipped_unit(unit_id, unit_info["source_path"], exceptions_base, "FailedConversion", current_cycle)
+                            self._move_skipped_unit(unit_id, unit_info["source_path"], exceptions_base, "ErConvert", current_cycle)
                             continue
                     
                     # Для архивов проверяем наличие операции extract
@@ -338,6 +365,12 @@ class Merger:
 
             except Exception as e:
                 errors.append({"unit_id": unit_id, "error": str(e)})
+                # Перемещаем UNIT в ErMerge при критических ошибках
+                if er_merge_base:
+                    try:
+                        self._move_to_er_merge(unit_id, unit_info["source_path"], er_merge_base, str(e), current_cycle)
+                    except Exception as move_error:
+                        logger.error(f"Failed to move unit {unit_id} to ErMerge: {move_error}")
 
         return {
             "units_processed": len(processed_units),

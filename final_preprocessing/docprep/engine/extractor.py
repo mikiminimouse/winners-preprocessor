@@ -225,7 +225,7 @@ class Extractor:
                 from ..core.config import EXCEPTIONS_DIR
                 exceptions_base = EXCEPTIONS_DIR
             
-            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "FailedExtraction"
+            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "ErExtact"
             
             # Перемещаем в Exceptions
             target_dir = move_unit_to_target(

@@ -149,6 +149,75 @@ class ExtensionNormalizer:
                 errors.append({"file": str(file_path), "error": str(e)})
                 logger.error(f"Failed to normalize extension for {file_path}: {e}")
 
+        # Проверяем, были ли критические ошибки нормализации
+        # Если есть ошибки и файлы требуют нормализации, но нормализация не удалась
+        has_normalization_errors = False
+        if errors:
+            # Проверяем, были ли ошибки при попытке нормализации файлов, которые требуют нормализации
+            # Если есть ошибки и нет успешно нормализованных файлов, это критическая ошибка
+            files_requiring_normalization = []
+            for file_path in files:
+                try:
+                    detection = detect_file_type(file_path)
+                    classification = detection.get("classification")
+                    if classification == "normalize":
+                        files_requiring_normalization.append(file_path)
+                except Exception:
+                    pass
+            
+            # Если есть файлы, требующие нормализации, но нормализация не удалась (есть ошибки и нет нормализованных файлов)
+            if files_requiring_normalization and not normalized_files and errors:
+                has_normalization_errors = True
+
+        # Если были критические ошибки нормализации, перемещаем в Exceptions
+        if has_normalization_errors and not dry_run:
+            logger.warning(f"Normalization failed for unit {unit_id} - moving to Exceptions")
+            
+            # Определяем целевую директорию в Exceptions
+            from ...core.config import get_data_paths, EXCEPTIONS_DIR
+            if protocol_date:
+                data_paths = get_data_paths(protocol_date)
+                exceptions_base = data_paths["exceptions"]
+            else:
+                exceptions_base = EXCEPTIONS_DIR
+            
+            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "ErNormalaze"
+            
+            # Перемещаем в Exceptions
+            target_dir = move_unit_to_target(
+                unit_dir=unit_path,
+                target_base_dir=target_base_dir,
+                extension=None,
+                dry_run=dry_run,
+            )
+            
+            # Обновляем состояние в EXCEPTION_N
+            exception_state_map = {
+                1: UnitState.EXCEPTION_1,
+                2: UnitState.EXCEPTION_2,
+                3: UnitState.EXCEPTION_3,
+            }
+            new_state = exception_state_map.get(current_cycle, UnitState.EXCEPTION_1)
+            
+            update_unit_state(
+                unit_path=target_dir,
+                new_state=new_state,
+                cycle=current_cycle,
+                operation={
+                    "type": "normalize",
+                    "status": "failed",
+                    "errors": errors,
+                },
+            )
+            
+            return {
+                "unit_id": unit_id,
+                "files_normalized": 0,
+                "normalized_files": [],
+                "errors": errors,
+                "moved_to": str(target_dir),
+            }
+
         if not normalized_files:
             logger.info(f"No files needed normalization in unit {unit_id}")
             if manifest:

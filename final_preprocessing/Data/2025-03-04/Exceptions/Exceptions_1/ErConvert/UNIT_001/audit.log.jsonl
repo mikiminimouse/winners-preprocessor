@@ -1,0 +1,1 @@
+{"timestamp": "2025-12-25T20:28:08.137432Z", "unit_id": "UNIT_001", "event_type": "state_transition", "operation": "update_state", "correlation_id": "c69dccec-c681-495e-b08f-dc416cc74eb4", "details": {"new_state": "EXCEPTION_1", "cycle": 1, "final_cluster": null, "final_reason": null}, "state_before": "CLASSIFIED_1", "state_after": "EXCEPTION_1"}

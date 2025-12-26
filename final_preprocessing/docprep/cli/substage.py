@@ -37,6 +37,8 @@ def substage_convert_run(
     from_format: Optional[str] = typer.Option(None, "--from", help="Исходный формат"),
     to_format: Optional[str] = typer.Option(None, "--to", help="Целевой формат"),
     engine: str = typer.Option("libreoffice", "--engine", help="Движок конвертации"),
+    use_headless: bool = typer.Option(False, "--use-headless", help="Использовать headless конвертер (решает проблемы с X11)"),
+    mock_mode: bool = typer.Option(False, "--mock-mode", help="Режим симуляции для тестирования"),
     protocol_date: Optional[str] = typer.Option(None, "--date", help="Дата протокола (YYYY-MM-DD)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Подробный вывод"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Режим имитации"),
@@ -48,6 +50,8 @@ def substage_convert_run(
     from_format = _unwrap(from_format)
     to_format = _unwrap(to_format)
     engine = _unwrap(engine)
+    use_headless = _unwrap(use_headless)
+    mock_mode = _unwrap(mock_mode)
     protocol_date = _unwrap(protocol_date)
     verbose = _unwrap(verbose)
     dry_run = _unwrap(dry_run)

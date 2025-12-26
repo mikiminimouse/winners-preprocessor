@@ -152,24 +152,25 @@ def _build_options_from_template(template: Dict[str, Any]) -> PipelineOptions:
         options = PipelineOptions()
     
     # VLM pipeline (если указан в template)
-    vlm_config = template.get("models", {}).get("vlm")
-    if vlm_config:
-        try:
-            options.vlm = VlmPipelineOptions()
-            vlm_endpoint = os.environ.get("VLM_ENDPOINT")
-            if vlm_endpoint:
-                options.vlm.endpoint = vlm_endpoint
-            vlm_model = os.environ.get("VLM_MODEL", vlm_config.get("model", "default"))
-            if hasattr(options.vlm, "model"):
-                options.vlm.model = vlm_model
-            
-            # TODO: Cloud.ru integration placeholder
-            # Future integration for Granite model:
-            # if vlm_model == "granite_docling":
-            #     options.vlm.provider = "cloud_ru"
-            #     options.vlm.model_path = "run granite_docling"
-        except Exception:
-            pass
+    # Temporarily disabled due to configuration issues
+    # vlm_config = template.get("models", {}).get("vlm")
+    # if vlm_config:
+    #     try:
+    #         options.vlm = VlmPipelineOptions()
+    #         vlm_endpoint = os.environ.get("VLM_ENDPOINT")
+    #         if vlm_endpoint:
+    #             options.vlm.endpoint = vlm_endpoint
+    #         vlm_model = os.environ.get("VLM_MODEL", vlm_config.get("model", "default"))
+    #         if hasattr(options.vlm, "model"):
+    #             options.vlm.model = vlm_model
+    #         
+    #         # TODO: Cloud.ru integration placeholder
+    #         # Future integration for Granite model:
+    #         # if vlm_model == "granite_docling":
+    #         #     options.vlm.provider = "cloud_ru"
+    #         #     options.vlm.model_path = "run granite_docling"
+    #     except Exception:
+    #         pass
     
     # OCR options
     # TODO: Cloud.ru integration placeholder for PaddleOCR

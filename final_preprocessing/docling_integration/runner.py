@@ -125,7 +125,20 @@ def run_docling_conversion(
             # Создаем DocumentConverter с опциями
             # Если options=None, используем опции по умолчанию (без параметров)
             if options is not None:
-                converter = DocumentConverter(options)
+                # Extract format_options from PipelineOptions
+                from docling.document_converter import FormatOption
+                from docling.datamodel.base_models import InputFormat
+                format_options = {}
+                
+                # Handle PDF options
+                if hasattr(options, 'pdf') and options.pdf is not None:
+                    format_options[InputFormat.PDF] = FormatOption(
+                        pipeline_options=options.pdf,
+                        pipeline_cls=None,  # Use default pipeline class
+                        backend=None  # Use default backend
+                    )
+                
+                converter = DocumentConverter(format_options=format_options)
             else:
                 # Используем опции по умолчанию
                 converter = DocumentConverter()

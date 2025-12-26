@@ -26,6 +26,11 @@ def merge_collect(
     """
     merger = Merger()
 
+    # Определяем ErMerge базовую директорию
+    from ..core.config import get_data_paths
+    data_paths = get_data_paths()
+    er_merge_base = data_paths.get("er_merge")
+
     if from_all:
         # Собираем из всех Merge_N
         source_dirs = []
@@ -38,6 +43,6 @@ def merge_collect(
         source_dirs = [source_dir]
         typer.echo(f"Сборка: {source_dir} -> {target_dir}")
 
-    result = merger.collect_units(source_dirs, target_dir, cycle)
+    result = merger.collect_units(source_dirs, target_dir, cycle, er_merge_base)
     typer.echo(f"Обработано UNIT: {result['units_processed']}")
 

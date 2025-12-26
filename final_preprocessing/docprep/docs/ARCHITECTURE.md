@@ -32,18 +32,37 @@ Data/
     │   ├── Merge_0/
     │   │   └── Direct/      # Прямые файлы (без обработки)
     │   ├── Merge_1/
-    │   │   ├── Converted/  # Конвертированные файлы
+    │   │   ├── Converted/   # Конвертированные файлы
     │   │   ├── Extracted/   # Извлеченные из архивов
     │   │   └── Normalized/  # Нормализованные файлы
     │   ├── Merge_2/
     │   └── Merge_3/
     ├── Exceptions/          # Исключения
     │   ├── Exceptions_1/
-    │   │   ├── Ambiguous/   # Неопределенные/пустые UNIT
-    │   │   ├── Mixed/       # Смешанные типы файлов
-    │   │   └── Special/     # Специальные файлы
+    │   │   ├── Empty/       # Только пустые UNIT
+    │   │   ├── Special/     # Специальные файлы/подписи/приложения
+    │   │   ├── Ambiguous/   # UNIT с нераспознанными форматами
+    │   │   ├── ErConvert/   # UNIT с ошибками конвертации
+    │   │   ├── ErNormalaze/ # UNIT с ошибками нормализации
+    │   │   └── ErExtact/    # UNIT с ошибками извлечения
     │   ├── Exceptions_2/
+    │   │   ├── Empty/
+    │   │   ├── Special/
+    │   │   ├── Ambiguous/
+    │   │   ├── ErConvert/
+    │   │   ├── ErNormalaze/
+    │   │   └── ErExtact/
     │   └── Exceptions_3/
+    │       ├── Empty/
+    │       ├── Special/
+    │       ├── Ambiguous/
+    │       ├── ErConvert/
+    │       ├── ErNormalaze/
+    │       └── ErExtact/
+    ├── ErMerge/             # Ошибки при финальном merge
+    │   ├── Cycle_1/
+    │   ├── Cycle_2/
+    │   └── Cycle_3/
     └── Ready2Docling/       # Готовые к обработке в Docling
 ```
 

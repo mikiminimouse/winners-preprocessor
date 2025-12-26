@@ -190,6 +190,12 @@ def stage_merge(
         merge_category = "Extracted"
     elif "Normalize" in source_str:
         merge_category = "Normalized"
+    elif "Direct" in source_str:
+        # Direct файлы НЕ должны попадать в merge из Processing_N
+        # Они идут напрямую в Merge_0/Direct/ после классификации в цикле 1
+        # Если кто-то пытается сделать merge Direct файлов, это ошибка
+        typer.echo(f"⚠️  Direct файлы не должны попадать в merge из Processing_N. Они идут напрямую в Merge_0/Direct/", err=True)
+        return
     else:
         # Если не удалось определить, пытаемся из manifest
         merge_category = "Converted"  # Fallback

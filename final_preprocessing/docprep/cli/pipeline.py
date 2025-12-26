@@ -113,8 +113,11 @@ def run(
 
     typer.echo(f"🔍 Источники для Merge: {[d.name for d in merge_dirs]}")
     
+    # Получаем er_merge_base для обработки ошибок финального merge
+    er_merge_base = data_paths.get("er_merge")
+    
     try:
-        result = merger_engine.collect_units(merge_dirs, output_dir)
+        result = merger_engine.collect_units(merge_dirs, output_dir, cycle=None, er_merge_base=er_merge_base)
         typer.echo(f"✅ Успешно обработано: {result['units_processed']} UNITs")
         
         if result.get("errors"):

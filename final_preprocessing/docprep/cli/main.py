@@ -17,6 +17,7 @@ from . import merge
 from . import inspect_cmd as inspect
 from . import utils
 from . import stats
+from . import chunked_classifier
 
 app = typer.Typer(
     name="docprep",
@@ -45,6 +46,7 @@ app.add_typer(cycle.app, name="cycle")
 app.add_typer(stage.app, name="stage")
 app.add_typer(substage.app, name="substage")
 app.add_typer(classifier.app, name="classifier")
+app.add_typer(chunked_classifier.app, name="chunked-classifier")
 app.add_typer(merge.app, name="merge")
 app.add_typer(inspect.app, name="inspect")
 app.add_typer(utils.app, name="utils")

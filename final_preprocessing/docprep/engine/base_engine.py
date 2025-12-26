@@ -60,7 +60,7 @@ class BaseEngine(ABC):
         
         Args:
             unit_path: Путь к юниту
-            reason: Причина перемещения (FailedConversion, EmptyExtraction, etc.)
+            reason: Причина перемещения (Empty, Special, Ambiguous, ErConvert, ErNormalaze, ErExtact)
             cycle: Номер цикла
             exceptions_base: Базовая директория Exceptions
         
@@ -68,7 +68,7 @@ class BaseEngine(ABC):
             Новый путь к юниту
         """
         unit_id = unit_path.name
-        target_dir = exceptions_base / f"Cycle_{cycle}" / reason / unit_id
+        target_dir = exceptions_base / f"Exceptions_{cycle}" / reason / unit_id
         
         if self.dry_run:
             logger.info(f"[DRY RUN] Would move {unit_id} to {target_dir}")

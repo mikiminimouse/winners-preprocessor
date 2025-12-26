@@ -24,6 +24,7 @@ PROCESSING_DIR = DATA_BASE_DIR / "Processing"
 MERGE_DIR = DATA_BASE_DIR / "Merge"
 READY2DOCLING_DIR = DATA_BASE_DIR / "Ready2Docling"
 EXCEPTIONS_DIR = DATA_BASE_DIR / "Exceptions"  # Отдельная директория, аналогично Merge
+ER_MERGE_DIR = DATA_BASE_DIR / "ErMerge"  # Директория для ошибок при финальном merge
 
 # Максимальное количество циклов обработки
 MAX_CYCLES = 3
@@ -139,6 +140,10 @@ def init_directory_structure(base_dir: Optional[Path] = None, date: Optional[str
     # Создаем базовые директории
     input_base.mkdir(parents=True, exist_ok=True)
     ready_base.mkdir(parents=True, exist_ok=True)
+    
+    # Создаем ErMerge директорию
+    er_merge_base = ER_MERGE_DIR if date is None else date_dir / "ErMerge"
+    er_merge_base.mkdir(parents=True, exist_ok=True)
 
     # Создаем Merge_0/Direct/ (единственная Direct директория)
     merge_0_dir = merge_base / "Merge_0"
@@ -169,7 +174,7 @@ def init_directory_structure(base_dir: Optional[Path] = None, date: Optional[str
 
         # Exceptions/Exceptions_N структура (отдельная директория, аналогично Merge)
         exceptions_dir = exceptions_base / f"Exceptions_{cycle}"
-        for subdir in ["Special", "Mixed", "Ambiguous", "Empty"]:
+        for subdir in ["Empty", "Special", "Ambiguous", "ErConvert", "ErNormalaze", "ErExtact"]:
             (exceptions_dir / subdir).mkdir(parents=True, exist_ok=True)
 
         # Merge_N структура (Merge_1, Merge_2, Merge_3 содержат Converted, Extracted, Normalized)
@@ -178,6 +183,10 @@ def init_directory_structure(base_dir: Optional[Path] = None, date: Optional[str
             category_dir = merge_cycle_dir / category
             for ext in EXTENSIONS_DIRECT:
                 (category_dir / ext).mkdir(parents=True, exist_ok=True)
+
+        # ErMerge/Cycle_N структура
+        er_merge_cycle_dir = er_merge_base / f"Cycle_{cycle}"
+        er_merge_cycle_dir.mkdir(parents=True, exist_ok=True)
 
     # Ready2Docling структура с поддиректориями по расширениям
     for ext in EXTENSIONS_DIRECT:
@@ -206,6 +215,7 @@ def get_data_paths(date: Optional[str] = None) -> Dict[str, Path]:
         - processing: Processing директория
         - merge: Merge директория
         - exceptions: Exceptions директория
+        - er_merge: ErMerge директория
         - ready2docling: Ready2Docling директория
     """
     if date:
@@ -216,6 +226,7 @@ def get_data_paths(date: Optional[str] = None) -> Dict[str, Path]:
             "processing": date_dir / "Processing",
             "merge": date_dir / "Merge",
             "exceptions": date_dir / "Exceptions",
+            "er_merge": date_dir / "ErMerge",
             "ready2docling": date_dir / "Ready2Docling",
         }
     else:
@@ -225,6 +236,7 @@ def get_data_paths(date: Optional[str] = None) -> Dict[str, Path]:
             "processing": PROCESSING_DIR,
             "merge": MERGE_DIR,
             "exceptions": EXCEPTIONS_DIR,
+            "er_merge": ER_MERGE_DIR,
             "ready2docling": READY2DOCLING_DIR,
         }
 
