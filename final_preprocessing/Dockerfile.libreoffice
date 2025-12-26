@@ -1,0 +1,150 @@
+# Dockerfile для LibreOffice с headless поддержкой
+FROM ubuntu:22.04
+
+# Устанавливаем необходимые зависимости
+RUN apt-get update && apt-get install -y \
+    # LibreOffice и зависимости
+    libreoffice \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
+    # X11 для headless
+    xvfb \
+    xfonts-base \
+    xfonts-75dpi \
+    xfonts-100dpi \
+    xfonts-scalable \
+    # Утилиты
+    curl \
+    wget \
+    # Python для скриптов
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Настраиваем dconf workaround для headless режима
+ENV DCONF_PROFILE=/dev/null
+
+# Создаем рабочую директорию
+WORKDIR /app
+
+# Создаем скрипт для запуска LibreOffice с Xvfb
+RUN echo '#!/bin/bash\n\
+# Запуск Xvfb в фоне\n\
+Xvfb :99 -screen 0 1024x768x24 -ac > /dev/null 2>&1 &\n\
+export DISPLAY=:99\n\
+\n\
+# Настройка dconf для headless\n\
+export DCONF_PROFILE=/dev/null\n\
+\n\
+# Запуск LibreOffice\n\
+exec libreoffice "$@"' > /usr/local/bin/libreoffice-headless
+
+RUN chmod +x /usr/local/bin/libreoffice-headless
+
+# Создаем скрипт для конвертации
+RUN echo '#!/bin/bash\n\
+# Запуск Xvfb если не запущен\n\
+if ! pgrep -f "Xvfb.*:99" > /dev/null; then\n\
+    Xvfb :99 -screen 0 1024x768x24 -ac > /dev/null 2>&1 &\n\
+    sleep 2\n\
+fi\n\
+\n\
+export DISPLAY=:99\n\
+export DCONF_PROFILE=/dev/null\n\
+\n\
+# Конвертация файла\n\
+INPUT_FILE="$1"\n\
+OUTPUT_DIR="${2:-/tmp}"\n\
+\n\
+if [ -z "$INPUT_FILE" ]; then\n\
+    echo "Usage: $0 <input_file> [output_dir]"\n\
+    exit 1\n\
+fi\n\
+\n\
+# Определяем формат вывода по расширению\n\
+case "$INPUT_FILE" in\n\
+    *.doc|*.docx|*.rtf|*.odt)\n\
+        OUTPUT_FORMAT=pdf\n\
+        ;;\n\
+    *.xls|*.xlsx|*.ods)\n\
+        OUTPUT_FORMAT=pdf\n\
+        ;;\n\
+    *.ppt|*.pptx|*.odp)\n\
+        OUTPUT_FORMAT=pdf\n\
+        ;;\n\
+    *)\n\
+        OUTPUT_FORMAT=pdf\n\
+        ;;\n\
+esac\n\
+\n\
+# Выполняем конвертацию\n\
+libreoffice --headless \\\n\
+    --convert-to "$OUTPUT_FORMAT" \\\n\
+    --outdir "$OUTPUT_DIR" \\\n\
+    "$INPUT_FILE" 2>/dev/null\n\
+\n\
+# Проверяем результат\n\
+BASENAME=$(basename "$INPUT_FILE" | sed 's/\.[^.]*$//')\n\
+OUTPUT_FILE="$OUTPUT_DIR/$BASENAME.$OUTPUT_FORMAT"\n\
+\n\
+if [ -f "$OUTPUT_FILE" ]; then\n\
+    echo "SUCCESS: $OUTPUT_FILE"\n\
+    exit 0\n\
+else\n\
+    echo "FAILED: Output file not found"\n\
+    exit 1\n\
+fi' > /usr/local/bin/convert-document
+
+RUN chmod +x /usr/local/bin/convert-document
+
+# Устанавливаем Python зависимости для тестирования
+COPY requirements.txt /app/
+RUN pip3 install -r requirements.txt
+
+# Копируем код
+COPY . /app/
+
+# Создаем директории для тестов
+RUN mkdir -p /tmp/converted /tmp/input
+
+# Тестируем установку
+RUN echo "Testing LibreOffice installation..." && \
+    echo "LibreOffice version:" && \
+    libreoffice-headless --version | head -1 && \
+    echo "Xvfb available:" && \
+    which xvfb-run && \
+    echo "Conversion script available:" && \
+    which convert-document
+
+# Команда по умолчанию - тест конвертации
+CMD ["python3", "-c", "
+import subprocess
+import sys
+from pathlib import Path
+
+print('🧪 Testing LibreOffice headless conversion...')
+
+# Создаем тестовый документ
+test_doc = Path('/tmp/test.doc')
+with open(test_doc, 'w') as f:
+    f.write('Test document content')
+
+print(f'📄 Created test document: {test_doc}')
+
+# Тестируем конвертацию
+result = subprocess.run([
+    '/usr/local/bin/convert-document',
+    str(test_doc),
+    '/tmp/converted'
+], capture_output=True, text=True, timeout=30)
+
+if result.returncode == 0:
+    print('✅ LibreOffice conversion test PASSED')
+    print(f'📄 Output: {result.stdout.strip()}')
+    sys.exit(0)
+else:
+    print('❌ LibreOffice conversion test FAILED')
+    print(f'📄 Error: {result.stderr.strip()}')
+    sys.exit(1)
+"]

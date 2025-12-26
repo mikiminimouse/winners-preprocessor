@@ -58,9 +58,7 @@ class Converter:
         # Инициализируем headless конвертер если нужно
         if use_headless:
             from ..core.libreoffice_converter import RobustDocumentConverter
-            self.headless_converter = RobustDocumentConverter()
-            if mock_mode:
-                self.headless_converter.libreoffice.mock_mode = True
+            self.headless_converter = RobustDocumentConverter(mock_mode=mock_mode)
 
         self.audit_logger = get_audit_logger()
 
