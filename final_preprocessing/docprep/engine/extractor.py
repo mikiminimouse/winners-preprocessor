@@ -149,25 +149,26 @@ class Extractor:
                 dry_run=dry_run,
             )
             
-            # Обновляем состояние
-            exception_state_map = {
-                1: UnitState.EXCEPTION_1,
-                2: UnitState.EXCEPTION_2,
-                3: UnitState.EXCEPTION_3,
-            }
-            new_state = exception_state_map.get(cycle, UnitState.EXCEPTION_1)
-            
-            update_unit_state(
-                unit_path=target_dir,
-                new_state=new_state,
-                cycle=cycle,
-                operation={
-                    "type": "extract",
-                    "status": "skipped",
-                    "reason": "no_processable_files",
-                },
-            )
-            
+            # Обновляем состояние (только если не dry_run)
+            if not dry_run:
+                exception_state_map = {
+                    1: UnitState.EXCEPTION_1,
+                    2: UnitState.EXCEPTION_2,
+                    3: UnitState.EXCEPTION_3,
+                }
+                new_state = exception_state_map.get(cycle, UnitState.EXCEPTION_1)
+
+                update_unit_state(
+                    unit_path=target_dir,
+                    new_state=new_state,
+                    cycle=cycle,
+                    operation={
+                        "type": "extract",
+                        "status": "skipped",
+                        "reason": "no_processable_files",
+                    },
+                )
+
             return {
                 "unit_id": unit_id,
                 "archives_processed": 0,

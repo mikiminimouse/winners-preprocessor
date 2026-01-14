@@ -8,8 +8,11 @@ from enum import Enum
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 import json
+import logging
 
 from .exceptions import StateTransitionError
+
+logger = logging.getLogger(__name__)
 
 
 class UnitState(Enum):

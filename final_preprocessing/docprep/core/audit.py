@@ -6,7 +6,7 @@ Append-only JSONL формат для отслеживания истории и
 import json
 from pathlib import Path
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -59,7 +59,7 @@ class AuditLogger:
             self._current_correlation_id = self.get_correlation_id()
 
         event = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "unit_id": unit_id,
             "event_type": event_type,
             "operation": operation,
