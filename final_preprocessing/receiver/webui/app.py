@@ -39,6 +39,9 @@ from receiver.webui.tabs.configuration import create_configuration_tab
 # Import services
 from receiver.webui.services.ui_service import get_ui_service
 
+# Custom CSS path
+CUSTOM_CSS_PATH = Path(__file__).parent / "static" / "custom_theme.css"
+
 def initialize_services():
     """Initialize all required services."""
     try:
@@ -49,18 +52,36 @@ def initialize_services():
         logger.error(f"❌ Failed to initialize UI services: {e}")
         return False
 
+def load_custom_css():
+    """Load custom CSS theme."""
+    if CUSTOM_CSS_PATH.exists():
+        try:
+            with open(CUSTOM_CSS_PATH, 'r', encoding='utf-8') as f:
+                css_content = f.read()
+                logger.info(f"✅ Loaded custom CSS theme from {CUSTOM_CSS_PATH}")
+                return css_content
+        except Exception as e:
+            logger.error(f"❌ Failed to load custom CSS: {e}")
+            return ""
+    else:
+        logger.warning(f"⚠️  Custom CSS file not found: {CUSTOM_CSS_PATH}")
+        return ""
+
 def main():
     """Main application entry point."""
     # Initialize services
     if not initialize_services():
         logger.error("❌ Failed to initialize services")
         return
-    
-    # Create Gradio interface
-    with gr.Blocks(title="Receiver Control Panel", theme=gr.themes.Default()) as demo:
-        gr.Markdown("# 🎛 Receiver Control Panel")
-        gr.Markdown("Unified interface for managing receiver components")
-        
+
+    # Load custom CSS
+    custom_css = load_custom_css()
+
+    # Create Gradio interface with custom theme
+    with gr.Blocks(css=custom_css) as demo:
+        gr.Markdown("# 🎛 RECEIVER CONTROL PANEL")
+        gr.Markdown("*Technical Operations Interface v2.0*")
+
         # Create tabs
         create_dashboard_tab()
         create_sync_control_tab()
@@ -68,7 +89,7 @@ def main():
         create_download_control_tab()
         create_health_check_tab()
         create_configuration_tab()
-    
+
     # Launch the app
     demo.launch(
         server_name="0.0.0.0",
