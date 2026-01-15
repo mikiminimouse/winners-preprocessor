@@ -260,7 +260,7 @@ class Classifier:
                 "unit_category": "empty",
                 "is_mixed": False,
                 "file_classifications": [],
-                "target_directory": str(target_base_dir),
+                "target_directory": str(target_dir_base),  # ИСПРАВЛЕНО: было target_base_dir
                 "moved_to": str(target_dir),
                 "error": "No files found in UNIT",
             }
@@ -590,15 +590,15 @@ class Classifier:
             
             # Если это direct в циклах 2-3, обрабатываем отдельно (уже реализовано выше для unit_category == "direct")
             # Но для простоты в mixed мы просто направляем в соответствующую директорию
-            
+
             target_dir = move_unit_to_target(
                 unit_dir=unit_path,
                 target_base_dir=target_base_dir,
-                extension=extension,
+                extension="Mixed",  # ИСПРАВЛЕНИЕ: Mixed units всегда идут в /Mixed/ поддиректорию
                 dry_run=dry_run,
                 copy_mode=copy_mode,
             )
-            
+
             # Определяем новое состояние на основе выбранной категории
             if cycle == 1:
                 if chosen_category == "direct":
@@ -876,7 +876,7 @@ class Classifier:
             data_paths = get_data_paths()
 
         # Определяем базовую директорию в зависимости от категории
-        if category in ["special", "mixed", "unknown", "empty"]:
+        if category in ["special", "unknown", "empty"]:  # ИСПРАВЛЕНИЕ: убрали "mixed" - он обрабатывается через routing
             # Exceptions находится внутри директории с датой
             exceptions_base = data_paths["exceptions"]
             return exceptions_base / f"Exceptions_{cycle}"

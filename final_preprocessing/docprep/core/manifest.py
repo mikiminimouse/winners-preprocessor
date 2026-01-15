@@ -5,6 +5,7 @@ Manifest = состояние UNIT, хранит текущее состояни
 Согласно PRD раздел 14: Manifest = состояние, Audit = история.
 """
 import json
+import os  # ДОБАВЛЕНО: для fsync()
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
@@ -48,8 +49,11 @@ def save_manifest(unit_path: Path, manifest: Dict[str, Any]) -> None:
     # Обновляем updated_at
     manifest["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
+    # ИСПРАВЛЕНИЕ БАГ #5: Добавление fsync() для гарантии записи на диск
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
+        f.flush()  # Flush Python buffers
+        os.fsync(f.fileno())  # Force write to disk
 
 
 def _determine_route_from_files(files: List[Dict[str, Any]]) -> str:

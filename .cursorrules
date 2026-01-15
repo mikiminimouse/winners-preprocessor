@@ -1,0 +1,170 @@
+# Winners Preprocessor System Prompt
+
+## Project Overview
+Мы работаем над системой **Winners Preprocessor** - DocPrep pipeline для предварительной обработки документов перед подачей в Docling. Система состоит из итеративных циклов (Cycle 1, 2, 3+), где каждый цикл включает:
+
+1. **Decision Engine** → Классификация и routing units
+2. **Processor Core** → Convert/Extract/Normalize операции
+3. **State Machine** → Управление состоянием units
+4. **Audit System** → Полное логирование всех операций
+
+## Architecture & Workflow
+
+### Cycle 1 (Ingestion & Classify)
+- **Input**: Raw files from `Data/YYYY-MM-DD/Input/`
+- **Classification**: Magic bytes detection, initial routing
+- **Output**: 
+  - `Merge/Merge_0/Direct/` (готовые к Docling)
+  - `Processing/Processing_1/` (нуждаются в обработке)
+  - `Exceptions/Exceptions_1/` (исключения)
+
+### Cycles 2+ (Processing & Refinement)
+- **Input**: Units из `Processing/Processing_{N-1}/`
+- **Processor Core**:
+  - **Convert**: LibreOffice конвертация (.doc→.docx, .xls→.xlsx, .rtf→.docx)
+  - **Extract**: Безопасная распаковка архивов (.zip, .rar, .7z)
+  - **Normalize**: Исправление расширений и имен файлов
+- **Output**:
+  - `Merge/Processed_{N}/` (готовые к Docling)
+  - `Processing/Processing_{N}/` (следующий цикл)
+  - `Exceptions/Processed_{N}/` (исключения)
+
+### Critical Components
+
+#### Processor Core (Priority Focus)
+- **Converter**: Многопоточная конвертация через LibreOffice
+  - Проверка корректности конвертации (magic bytes, MIME)
+  - Обработка ошибок, fallback стратегии
+  - X11/headless режимы для серверов
+
+- **Extractor**: Безопасная распаковка с защитой от zip bombs
+  - Лимиты: 500MB, 1000 файлов, глубина 10
+  - Поддержка ZIP/RAR/7Z
+  - Рекурсивная распаковка
+
+- **Normalizer**: Исправление файлов
+  - **Extension**: По сигнатурам (fake .docx → .pdf)
+  - **Name**: Санитизация имен ("протокол итог. чdocx" → "protocol.docx")
+
+#### Decision Engine
+- Решает куда направить unit после обработки
+- Основан на результате операций Processor Core
+- Routing: Merge/Processing/Exceptions
+
+#### State Machine
+- **RAW** → **CLASSIFIED_1** → **MERGED_DIRECT** | **CLASSIFIED_2** → etc.
+- Атомарные переходы с валидацией
+- Recovery при сбоях
+
+## Development Workflow
+
+### Current Focus: Cycles 2+ Refactoring
+Мы рефакторим компоненты Cycles 2+ до этапа merge2docling. Задачи:
+
+1. **Отладка Processor Core операций**
+   - Convert: корректность конвертаций форматов
+   - Extract: безопасность и полнота распаковки
+   - Normalize: точность исправления расширений/имен
+
+2. **Валидация State Machine transitions**
+   - Правильные переходы между состояниями
+   - Recovery после сбоев
+
+3. **Тестирование на реальных данных**
+   - `Data/2025-03-18/` и `Data/2025-12-20/`
+   - Batch processing, checkpoints
+   - Comprehensive validation
+
+### Testing Strategy
+- **Small tests**: 100-500 units для быстрой проверки
+- **Full tests**: 2585+ units с checkpoints
+- **Validation**: Mixed units routing, manifests, audit logs
+- **Performance**: 5-8 units/sec, memory/disk usage
+
+## Code Quality Standards
+
+### Python Code Style
+```python
+# ✓ Good: Descriptive names, type hints, docstrings
+def process_unit_batch(
+    unit_paths: List[Path], 
+    cycle: int, 
+    batch_size: int = 50
+) -> Dict[str, Any]:
+    """Process batch of units with error handling and progress tracking."""
+    
+# ✓ Good: Structured error handling
+try:
+    result = operation()
+except SpecificError as e:
+    logger.error(f"Operation failed: {e}")
+    return handle_error(e)
+except Exception as e:
+    logger.critical(f"Unexpected error: {e}")
+    raise
+```
+
+### Logging & Auditing
+- **Structured logging**: JSON format для machine readability
+- **Correlation IDs**: Для tracking операций через всю систему
+- **Audit trail**: Каждая операция логируется с context
+
+### Error Handling
+- **Circuit breakers**: Для предотвращения cascade failures
+- **Quarantine**: Problematic units в специальные директории
+- **Recovery**: Checkpoint-based resume после сбоев
+
+## File Structure Reference
+
+```
+docprep/
+├── core/                    # Core business logic
+│   ├── unit_processor.py    # Unit lifecycle management
+│   ├── decision_engine.py   # Routing decisions
+│   ├── state_machine.py     # State transitions
+│   ├── manifest.py          # Unit metadata
+│   └── audit.py            # Audit logging
+├── engine/                  # Processing engines
+│   ├── converter.py         # LibreOffice conversions
+│   ├── extractor.py         # Archive extraction
+│   └── normalizers/         # File normalization
+├── cli/                     # Command line interface
+│   ├── cycle.py            # Cycle management
+│   ├── stage.py            # Processing stages
+│   └── substage.py         # Sub-stage operations
+└── utils/                   # Utilities
+    ├── paths.py            # Path operations
+    ├── file_ops.py         # File operations
+    └── disk_utils.py       # Disk space checks
+```
+
+## Current Development Context
+
+### Active Work Areas
+1. **Processor Core Refactoring**: Convert/Extract/Normalize operations
+2. **State Machine Reliability**: Transition validation и recovery
+3. **Testing Infrastructure**: Comprehensive validation scripts
+4. **Performance Optimization**: Batch processing, memory usage
+
+### Known Issues to Address
+- Mixed units routing (фикс уже применен)
+- LibreOffice conversion stability
+- Archive extraction security limits
+- Extension normalization accuracy
+
+### Success Criteria
+- ✅ Processor Core operations корректны и надежны
+- ✅ State transitions валидны и recoverable
+- ✅ Full pipeline проходит 2585+ units без critical errors
+- ✅ Mixed units правильно маршрутизированы
+- ✅ Audit logs complete и searchable
+
+## Communication Style
+- **Технический**: Используй точную терминологию (unit, cycle, manifest, state machine)
+- **Структурированный**: Разбивай ответы на секции с заголовками
+- **Практический**: Предлагай конкретные решения, не высокоуровневые описания
+- **Документированный**: Объясняй зачем вносишь изменения
+- **Тестируемый**: Указывай как проверить изменения
+
+## Reference Implementation
+Смотри `webui_docprep/components/ProcessingControl.tsx` для понимания архитектуры циклов и компонентов. Этот файл содержит референсную реализацию pipeline flow.

@@ -132,7 +132,9 @@ def get_extension_subdirectory(
         return _get_extension_for_convert(classification, detected_type, original_extension)
     elif category == "extract":
         return _get_extension_for_extract(detected_type, original_extension)
-    
+    elif category == "mixed":
+        return "Mixed"
+
     return None
 
 
@@ -282,20 +284,48 @@ def move_unit_to_target(
         return target_dir
 
     # Перемещаем или копируем UNIT
+    # ИСПРАВЛЕНИЕ БАГ #2: Проверка что target_dir пустая перед удалением (избежать потери данных)
     if target_dir.exists() and target_dir != unit_dir:
-        logger.warning(f"Target directory exists, removing: {target_dir}")
-        shutil.rmtree(target_dir)
+        # КРИТИЧЕСКАЯ ПРОВЕРКА: target_dir должна быть пустой или это ошибка
+        if any(target_dir.iterdir()):
+            error_msg = f"Target directory not empty, refusing to overwrite: {target_dir}"
+            logger.error(error_msg)
+            raise FileExistsError(error_msg)
+        # Если директория пустая - безопасно удалить
+        logger.warning(f"Removing empty target directory: {target_dir}")
+        try:
+            shutil.rmtree(target_dir)
+        except OSError as e:
+            logger.error(f"Failed to remove target directory {target_dir}: {e}")
+            raise
 
+    # ИСПРАВЛЕНИЕ БАГ #3: Обертка try-except для move/copy операций
     if unit_dir != target_dir:
-        if copy_mode:
-            logger.info(f"Copying unit {unit_id}: {unit_dir} -> {target_dir}")
-            shutil.copytree(str(unit_dir), str(target_dir), dirs_exist_ok=True)
-            # При копировании не очищаем исходную директорию
-        else:
-            logger.info(f"Moving unit {unit_id}: {unit_dir} -> {target_dir}")
-            shutil.move(str(unit_dir), str(target_dir))
-            # Очищаем пустые директории после перемещения
-            _cleanup_empty_directories(unit_dir)
+        try:
+            if copy_mode:
+                logger.info(f"Copying unit {unit_id}: {unit_dir} -> {target_dir}")
+                shutil.copytree(str(unit_dir), str(target_dir), dirs_exist_ok=True)
+                # При копировании не очищаем исходную директорию
+            else:
+                logger.info(f"Moving unit {unit_id}: {unit_dir} -> {target_dir}")
+                shutil.move(str(unit_dir), str(target_dir))
+                # Cleanup только после успешного перемещения
+                try:
+                    _cleanup_empty_directories(unit_dir)
+                except Exception as cleanup_error:
+                    # Cleanup failure не критична
+                    logger.warning(f"Failed to cleanup {unit_dir}: {cleanup_error}")
+        except (OSError, shutil.Error) as e:
+            error_msg = f"Failed to {'copy' if copy_mode else 'move'} unit {unit_id} from {unit_dir} to {target_dir}: {e}"
+            logger.error(error_msg)
+            # Если копирование/перемещение failed, удалить частично созданную целевую директорию
+            if target_dir.exists():
+                try:
+                    shutil.rmtree(target_dir)
+                    logger.info(f"Cleaned up failed target directory: {target_dir}")
+                except Exception as cleanup_err:
+                    logger.error(f"Failed to cleanup target directory: {cleanup_err}")
+            raise RuntimeError(error_msg) from e
     else:
         logger.debug(f"Unit {unit_id} already at target location: {target_dir}")
 
