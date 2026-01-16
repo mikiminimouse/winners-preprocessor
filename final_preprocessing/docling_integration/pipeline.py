@@ -168,10 +168,10 @@ class DoclingPipeline:
                 logger.debug("Using default Docling options (DocumentConverter() without options)")
 
             # Шаг 4: Запуск конвертации через runner
+            # input_format не передаем - Docling определяет формат автоматически
             document = run_docling_conversion(
                 main_file,
                 options=options,
-                input_format=input_format,
             )
 
             if not document:

@@ -278,11 +278,16 @@ class Extractor:
             save_manifest(unit_path, manifest)
 
         # Определяем расширение для сортировки из извлеченных файлов
-        # Для Mixed units используем "Mixed" вместо расширения файла
-        if manifest and manifest.get("is_mixed", False):
-            extension = "Mixed"
-        else:
-            extension = determine_unit_extension(unit_path)
+        # Mixed статус сохраняется в manifest, но используем реальное расширение из файлов
+        # для корректной сортировки по типам
+        extension = determine_unit_extension(unit_path)
+        # Если расширение не определено, пытаемся определить из извлеченных файлов
+        if not extension and extracted_files:
+            for ef in extracted_files:
+                ext_path = Path(ef.get("extracted_path", ""))
+                if ext_path.suffix:
+                    extension = ext_path.suffix.lower().lstrip('.')
+                    break
 
         # Определяем следующий цикл (после извлечения переходим к следующему циклу)
         next_cycle = min(current_cycle + 1, 3)

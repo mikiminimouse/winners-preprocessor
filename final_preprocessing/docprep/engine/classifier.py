@@ -362,7 +362,7 @@ class Classifier:
         if unit_category == "direct" and cycle > 1:
             # UNIT уже обработан и готов к merge - переводим в MERGED_PROCESSED
             # Direct файлы ВСЕГДА идут в Merge/Direct/ (единственная директория Direct в Merge)
-            from ..core.config import get_data_paths
+            # get_data_paths уже импортирован в начале файла (строка 22)
             data_paths = get_data_paths(protocol_date)
             target_base_dir = data_paths["merge"] / "Direct"
 
@@ -569,14 +569,19 @@ class Classifier:
             
             # Определяем целевую базу для выбранной категории
             target_base_dir = self._get_target_directory_base(chosen_category, cycle, protocol_date)
-            
+
             # Если это direct в циклах 2-3, обрабатываем отдельно (уже реализовано выше для unit_category == "direct")
             # Но для простоты в mixed мы просто направляем в соответствующую директорию
 
+            # Mixed - это поддиректория, а не расширение файла
+            # Создаем поддиректорию Mixed и используем её как target
+            mixed_dir = target_base_dir / "Mixed"
+            mixed_dir.mkdir(parents=True, exist_ok=True)
+
             target_dir = move_unit_to_target(
                 unit_dir=unit_path,
-                target_base_dir=target_base_dir,
-                extension="Mixed",  # ИСПРАВЛЕНИЕ: Mixed units всегда идут в /Mixed/ поддиректорию
+                target_base_dir=mixed_dir,
+                extension=None,  # Без дополнительной сортировки по расширению внутри Mixed
                 dry_run=dry_run,
                 copy_mode=copy_mode,
             )
@@ -626,7 +631,7 @@ class Classifier:
             # Определяем новое состояние на основе цикла и текущего состояния
             # Проверяем текущее состояние из manifest
             manifest_path = target_dir / "manifest.json"
-            from ..core.state_machine import UnitStateMachine
+            # UnitStateMachine уже импортирован на уровне модуля
             state_machine = UnitStateMachine(unit_id, manifest_path)
             current_state = state_machine.get_current_state()
             

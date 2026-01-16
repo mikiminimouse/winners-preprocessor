@@ -1,20 +1,24 @@
 # Pipeline template for image_ocr route
 # Image files (JPG, PNG, TIFF) requiring OCR
-# Performance: ~60-100 images/hour/CPU
+# Performance: ~60-120 images/hour/CPU with EasyOCR
 
 route: image_ocr
 
 models:
-  ocr: tesseract
+  ocr: easyocr  # Changed from tesseract to easyocr
   layout: none
 
+# OCR options for Russian language support
+ocr_options:
+  lang: ["ru", "en"]  # EasyOCR uses ISO language codes
+  confidence_threshold: 0.5
+
 performance:
-  threads: 4
+  threads: 3  # Reduced for CPU-bound EasyOCR
   dpi: 300
 
 docling:
   force_ocr: true
-  language: eng
   extract_tables: true  # Attempt to extract tables from images
 
 processing_constraints:

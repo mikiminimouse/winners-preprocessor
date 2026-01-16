@@ -1,21 +1,25 @@
 # Pipeline template for pdf_scan route
 # PDF documents with scanned content (requires OCR)
-# Performance: ~10-20 PDF/hour/CPU
+# Performance: ~30-60 PDF/hour/CPU with EasyOCR
 
 route: pdf_scan
 
 models:
-  ocr: tesseract
+  ocr: easyocr  # Changed from tesseract to easyocr
   layout: docbank
   tables: off
 
+# OCR options for Russian language support
+ocr_options:
+  lang: ["ru", "en"]  # EasyOCR uses ISO language codes
+  confidence_threshold: 0.5
+
 performance:
-  threads: 6
+  threads: 3  # Reduced for CPU-bound EasyOCR
   dpi: 300
 
 docling:
   force_ocr: true
-  language: eng
   do_caption_mentions: true
   extract_figures: true
 

@@ -465,7 +465,7 @@ class Merger:
         if manifest:
             route = manifest.get("processing", {}).get("route")
             if route == "mixed":
-                return base_dir / "mixed"
+                return base_dir / "Mixed"
             if route:
                 # Маппинг route на директории
                 route_to_dir = {
@@ -517,7 +517,7 @@ class Merger:
         }
         
         if file_type == "mixed":
-            return base_dir / "mixed"
+            return base_dir / "Mixed"
 
         subdir_name = type_to_dir.get(file_type, "other")
         
@@ -647,5 +647,103 @@ class Merger:
                     subdir_name = "pdf/mixed"
             else:
                 subdir_name = "pdf/scan"
-        
+
         return base_dir / subdir_name
+
+    def collect_to_ready2docling(self, source_dirs: List[Path], target_dir: Path) -> Dict[str, Any]:
+        """
+        Собирает UNIT в Ready2Docling с сортировкой по типам файлов.
+
+        Ожидаемая структура Ready2Docling:
+        - pdf/          # PDF файлы
+        - docx/         # DOCX файлы
+        - html/         # HTML файлы
+        - xlsx/         # XLSX файлы
+        - Mixed/        # Mixed UNIT (несколько типов файлов)
+        - other/        # Прочие форматы
+
+        Args:
+            source_dirs: Список директорий источников (Merge/Direct, Merge/Processed_N)
+            target_dir: Целевая директория (Ready2Docling)
+
+        Returns:
+            Словарь с результатами:
+            - units_processed: количество обработанных UNIT
+            - by_type: распределение по типам
+        """
+        results = {"units_processed": 0, "by_type": {}}
+
+        for source_dir in source_dirs:
+            if not source_dir.exists():
+                continue
+
+            for unit_dir in source_dir.glob("**/UNIT_*"):
+                if not unit_dir.is_dir():
+                    continue
+
+                # Определяем тип UNIT
+                unit_type = self._determine_unit_type(unit_dir)
+
+                # Целевая поддиректория
+                type_dir = target_dir / unit_type
+                type_dir.mkdir(parents=True, exist_ok=True)
+
+                # Копируем UNIT
+                dest = type_dir / unit_dir.name
+                if not dest.exists():
+                    shutil.copytree(unit_dir, dest)
+                    results["units_processed"] += 1
+                    results["by_type"][unit_type] = results["by_type"].get(unit_type, 0) + 1
+                    logger.info(f"Collected {unit_dir.name} to {unit_type}")
+
+        return results
+
+    def _determine_unit_type(self, unit_dir: Path) -> str:
+        """
+        Определяет тип UNIT по файлам внутри.
+
+        Args:
+            unit_dir: Путь к директории UNIT
+
+        Returns:
+            Тип UNIT (pdf, docx, html, xlsx, Mixed, other)
+        """
+        files = [f for f in unit_dir.iterdir() if f.is_file() and not f.name.startswith('.')]
+
+        # Исключаем служебные файлы
+        content_files = [f for f in files if f.name not in ('manifest.json', 'audit.log.jsonl')]
+
+        if not content_files:
+            return "other"
+
+        # Собираем расширения
+        extensions = set()
+        for f in content_files:
+            ext = f.suffix.lower().lstrip('.')
+            if ext:
+                extensions.add(ext)
+
+        # Если разные типы - Mixed
+        if len(extensions) > 1:
+            return "Mixed"
+
+        # Маппинг расширений на директории
+        ext = extensions.pop() if extensions else "other"
+        type_map = {
+            'pdf': 'pdf',
+            'docx': 'docx',
+            'doc': 'docx',
+            'xlsx': 'xlsx',
+            'xls': 'xlsx',
+            'html': 'html',
+            'htm': 'html',
+            'xml': 'html',
+            'pptx': 'pptx',
+            'ppt': 'pptx',
+            'rtf': 'rtf',
+            'jpg': 'image',
+            'jpeg': 'image',
+            'png': 'image',
+            'tiff': 'image',
+        }
+        return type_map.get(ext, 'other')

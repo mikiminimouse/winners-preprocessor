@@ -75,14 +75,31 @@ def sample_archive_unit(temp_dir):
     unit_id = "UNIT_000456"
     unit_path = temp_dir / unit_id
     unit_path.mkdir(parents=True)
-    
+
     # Создаем ZIP архив
     import zipfile
     zip_path = unit_path / "archive.zip"
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr("file1.txt", "Content 1")
         zf.writestr("file2.txt", "Content 2")
-    
+
+    return unit_path
+
+
+@pytest.fixture
+def sample_archive_unit_alt(temp_dir):
+    """Создает UNIT с архивом (альтернативный ID для избежания конфликтов)."""
+    unit_id = "UNIT_000457"
+    unit_path = temp_dir / unit_id
+    unit_path.mkdir(parents=True)
+
+    # Создаем ZIP архив
+    import zipfile
+    zip_path = unit_path / "archive.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("file1.txt", "Content 1")
+        zf.writestr("file2.txt", "Content 2")
+
     return unit_path
 
 

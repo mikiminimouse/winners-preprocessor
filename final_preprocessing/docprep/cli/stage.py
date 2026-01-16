@@ -23,6 +23,7 @@ def stage_classifier(
     protocol_date: Optional[str] = typer.Option(None, "--date", help="Дата протокола (YYYY-MM-DD)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Подробный вывод"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Режим имитации"),
+    copy_mode: bool = typer.Option(False, "--copy", help="Копировать вместо перемещения (сохраняет исходные файлы)"),
 ):
     """Прогнать classifier по всей директории."""
     if not input_dir.exists():
@@ -33,14 +34,15 @@ def stage_classifier(
         protocol_date = datetime.now().strftime("%Y-%m-%d")
 
     typer.echo(f"🔍 Classifier цикла {cycle}: {input_dir}")
-    
+    if copy_mode:
+        typer.echo("📋 Режим копирования включен (исходные файлы сохраняются)")
+
     classifier = Classifier()
-    
+
     def process_unit(unit_path: Path) -> dict:
         """Обработка одного UNIT классификатором."""
-        # copy_mode автоматически определяется в classify_unit для Input директории
-        # (units из Input всегда копируются, а не перемещаются)
-        result = classifier.classify_unit(unit_path, cycle, protocol_date, None, dry_run, copy_mode=False)
+        # copy_mode передается явно или автоматически определяется для Input директории
+        result = classifier.classify_unit(unit_path, cycle, protocol_date, None, dry_run, copy_mode=copy_mode)
         if verbose:
             typer.echo(f"  ✓ {unit_path.name}: {result.get('category', 'unknown')}")
         return result

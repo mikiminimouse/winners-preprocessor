@@ -18,7 +18,7 @@ from .constants import (
 )
 from .pipeline import DoclingPipeline
 from .runner import run_docling_conversion, get_processed_count, reset_processed_counts
-from .config import build_docling_options, get_input_format_from_route, clear_template_cache
+from .config import build_docling_options, get_input_format_from_route, clear_template_cache, DoclingOptions
 from .bridge_docprep import load_unit_from_ready2docling, get_main_file
 
 __all__ = [
@@ -32,6 +32,7 @@ __all__ = [
     "build_docling_options",
     "get_input_format_from_route",
     "clear_template_cache",
+    "DoclingOptions",
     # Bridge
     "load_unit_from_ready2docling",
     "get_main_file",

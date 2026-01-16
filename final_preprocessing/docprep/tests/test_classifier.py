@@ -62,10 +62,10 @@ def test_classify_unit_creates_manifest(sample_unit_dir):
     assert moved_to.exists()
 
 
-def test_classify_unit_updates_state(sample_archive_unit):
+def test_classify_unit_updates_state(sample_archive_unit_alt):
     """Тест обновления state machine при классификации."""
     classifier = Classifier()
-    result = classifier.classify_unit(sample_archive_unit, cycle=1)
+    result = classifier.classify_unit(sample_archive_unit_alt, cycle=1)
     
     # Проверяем, что state обновлен
     from docprep.core.manifest import load_manifest

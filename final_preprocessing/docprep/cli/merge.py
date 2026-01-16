@@ -46,3 +46,34 @@ def merge_collect(
     result = merger.collect_units(source_dirs, target_dir, cycle, er_merge_base)
     typer.echo(f"Обработано UNIT: {result['units_processed']}")
 
+
+@app.command("to-docling")
+def merge_to_docling(
+    source_dirs: list[Path] = typer.Argument(..., help="Исходные директории Merge/Direct/"),
+    target_dir: Path = typer.Option(..., "--target", "-t", help="Целевая Ready2Docling директория"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Подробный вывод"),
+):
+    """
+    Финальный merge в Ready2Docling с сортировкой по типам файлов.
+
+    Сортирует UNIT по поддиректориям (pdf/text, pdf/scan, docx, html, Mixed и т.д.)
+    на основе типа файлов и needs_ocr из manifest.
+
+    Пример:
+        docprep merge to-docling Data/Merge/Direct/pdf Data/Merge/Direct/docx --target Data/Ready2Docling
+    """
+    merger = Merger()
+
+    if verbose:
+        typer.echo(f"Источники: {[str(d) for d in source_dirs]}")
+        typer.echo(f"Цель: {target_dir}")
+
+    result = merger.collect_to_ready2docling(source_dirs, target_dir)
+
+    typer.echo(f"✅ Обработано UNIT: {result['units_processed']}")
+
+    if result.get("by_type"):
+        typer.echo("\nПо типам:")
+        for type_name, count in sorted(result["by_type"].items()):
+            typer.echo(f"  {type_name}: {count}")
+

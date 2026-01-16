@@ -4,9 +4,9 @@
 Использует pipeline templates из YAML файлов для конфигурации Docling,
 обеспечивая воспроизводимость и версионирование конфигураций.
 """
-import os
 import logging
 import yaml
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
@@ -26,6 +26,16 @@ PdfPipelineOptions = get_pdf_pipeline_options()
 VlmPipelineOptions = get_vlm_pipeline_options()
 InputFormat = get_input_format()
 DOCLING_AVAILABLE = is_docling_available()
+
+
+@dataclass
+class DoclingOptions:
+    """
+    Обёртка для опций Docling с поддержкой разных форматов.
+
+    Используется для передачи настроек между config.py и runner.py.
+    """
+    pdf: Optional[Any] = None  # PdfPipelineOptions
 
 # Путь к директории с pipeline templates
 TEMPLATES_DIR = Path(__file__).parent / "pipeline_templates"
@@ -92,33 +102,33 @@ def clear_template_cache():
     _load_yaml_file.cache_clear()
 
 
-def build_docling_options(route: str, manifest: Optional[Dict[str, Any]] = None) -> Optional[PipelineOptions]:
+def build_docling_options(route: str, _: Optional[Dict[str, Any]] = None) -> Optional["DoclingOptions"]:
     """
-    Строит Docling PipelineOptions на основе route через YAML templates (приоритетно)
-    или hardcoded конфигурацию (fallback).
+    Строит DoclingOptions на основе route через YAML templates.
 
     Args:
         route: Route из contract/manifest (pdf_text, pdf_scan, docx, xlsx, html, xml)
-        manifest: Полный manifest из docprep (опционально, для обратной совместимости)
+        _: Не используется, сохранён для обратной совместимости
 
     Returns:
-        PipelineOptions для DocumentConverter или None если Docling недоступен
+        DoclingOptions для DocumentConverter или None если Docling недоступен
+
+    Raises:
+        ValueError: Если YAML template не найден для указанного route
     """
     if not DOCLING_AVAILABLE:
         return None
-    
-    # Пытаемся загрузить template из YAML
+
     template = load_pipeline_template(route)
     if template:
         return _build_options_from_template(template)
-    
-    # Fallback на hardcoded конфигурацию для обратной совместимости
-    return _build_options_legacy(route, manifest)
+
+    raise ValueError(f"No pipeline template found for route: {route}")
 
 
-def _build_options_from_template(template: Dict[str, Any]) -> PipelineOptions:
+def _build_options_from_template(template: Dict[str, Any]) -> DoclingOptions:
     """
-    Строит PipelineOptions из YAML template.
+    Строит DoclingOptions из YAML template.
 
     ВАЖНО: Применяет ВСЕ настройки из YAML, включая:
     - models.layout - модель для layout detection
@@ -191,106 +201,29 @@ def _build_options_from_template(template: Dict[str, Any]) -> PipelineOptions:
         elif layout_setting:
             logger.info(f"[{route}] Layout detection ENABLED with model: {layout_setting}")
 
+        # === OCR OPTIONS (язык и движок) ===
+        ocr_options_config = template.get("ocr_options", {})
+        ocr_lang = ocr_options_config.get("lang")
+
+        if ocr_setting == "tesseract" and ocr_lang:
+            from docling.datamodel.pipeline_options import TesseractOcrOptions
+            pdf_opts.ocr_options = TesseractOcrOptions(lang=ocr_lang)
+            logger.info(f"[{route}] Tesseract OCR with lang={ocr_lang}")
+        elif ocr_setting == "easyocr" and ocr_lang:
+            from docling.datamodel.pipeline_options import EasyOcrOptions
+            confidence = ocr_options_config.get("confidence_threshold", 0.5)
+            pdf_opts.ocr_options = EasyOcrOptions(
+                lang=ocr_lang,
+                confidence_threshold=confidence,
+                use_gpu=False
+            )
+            logger.info(f"[{route}] EasyOCR with lang={ocr_lang}, confidence={confidence}")
+
         # Логируем итоговую конфигурацию
         logger.info(f"[{route}] PDF options: do_ocr={pdf_opts.do_ocr}, do_table_structure={pdf_opts.do_table_structure}")
 
-    # Создаем PipelineOptions с pdf опциями
-    if pdf_opts:
-        options = PipelineOptions(pdf=pdf_opts)
-    else:
-        options = PipelineOptions()
-
-    # VLM pipeline не используется для digital форматов.
-    # Для OCR (pdf_scan, image_ocr) VLM будет добавлен в отдельной задаче.
-
-    return options
-
-
-def _build_options_legacy(route: str, manifest: Optional[Dict[str, Any]]) -> PipelineOptions:
-    """
-    Строит PipelineOptions используя legacy hardcoded логику (fallback).
-    
-    Args:
-        route: Route для обработки
-        manifest: Manifest данные (опционально)
-        
-    Returns:
-        PipelineOptions для DocumentConverter
-    """
-    # Базовые опции для всех форматов
-    options = PipelineOptions()
-
-    # Маппинг route → настройки Docling
-    if route == "pdf_scan":
-        # PDF со сканированным содержимым - нужен OCR/VLM
-        options.pdf = PdfPipelineOptions()
-        options.pdf.do_ocr = True
-        options.pdf.do_table_structure = True  # Извлекаем таблицы даже из сканов
-        # VLM pipeline для лучшего качества OCR
-        try:
-            options.vlm = VlmPipelineOptions()
-            # Настройка VLM endpoint если доступен
-            vlm_endpoint = os.environ.get("VLM_ENDPOINT")
-            if vlm_endpoint:
-                options.vlm.endpoint = vlm_endpoint
-            # Настройка модели VLM
-            vlm_model = os.environ.get("VLM_MODEL", "default")
-            if hasattr(options.vlm, "model"):
-                options.vlm.model = vlm_model
-        except Exception:
-            # Если VLM недоступен, используем стандартный OCR
-            pass
-
-    elif route == "pdf_text":
-        # PDF с текстовым слоем - только text extraction
-        options.pdf = PdfPipelineOptions()
-        options.pdf.do_ocr = False
-        options.pdf.do_table_structure = True  # Извлекаем таблицы
-
-    elif route == "pdf_mixed":
-        # Смешанный PDF - используем OCR для страниц без текста
-        options.pdf = PdfPipelineOptions()
-        options.pdf.do_ocr = True
-        options.pdf.do_table_structure = True
-
-    elif route == "docx":
-        # Word документы - нативная обработка
-        pass  # Docling использует нативную обработку для DOCX
-
-    elif route == "xlsx":
-        # Excel таблицы - нативная обработка
-        pass  # Docling использует нативную обработку для XLSX
-
-    elif route == "pptx":
-        # PowerPoint презентации - нативная обработка
-        pass  # Docling использует нативную обработку для PPTX
-
-    elif route in ["html", "html_text"]:
-        # HTML документы - парсинг структуры
-        pass  # Docling парсит HTML структуру автоматически
-
-    elif route == "xml":
-        # XML документы - парсинг структуры
-        pass  # Docling парсит XML структуру автоматически
-
-    elif route == "image_ocr":
-        # Изображения - только OCR через PDF pipeline
-        options.pdf = PdfPipelineOptions()
-        options.pdf.do_ocr = True
-        options.pdf.do_table_structure = True  # Пытаемся извлечь таблицы из изображений
-
-    elif route == "rtf":
-        # RTF документы - обрабатываем как текст
-        pass  # Docling обрабатывает RTF
-
-    else:
-        # Fallback для неизвестных routes
-        # Используем базовые настройки с OCR по умолчанию
-        options.pdf = PdfPipelineOptions()
-        options.pdf.do_ocr = False
-        options.pdf.do_table_structure = True
-
-    return options
+    # Создаем DoclingOptions с pdf опциями
+    return DoclingOptions(pdf=pdf_opts)
 
 
 def get_input_format_from_route(route: str) -> Optional[InputFormat]:

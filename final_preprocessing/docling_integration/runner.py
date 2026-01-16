@@ -6,6 +6,7 @@ Runner - тонкая обертка над DocumentConverter из Docling.
 import logging
 import time
 import threading
+import warnings
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -13,14 +14,12 @@ from typing import Optional, Dict, Any
 from ._docling_import import (
     get_document_converter,
     get_pipeline_options,
-    get_input_format,
     is_docling_available,
 )
 
 # Получаем классы через shared модуль
 DocumentConverter = get_document_converter()
 PipelineOptions = get_pipeline_options()
-InputFormat = get_input_format()
 DOCLING_AVAILABLE = is_docling_available()
 
 
@@ -77,7 +76,6 @@ logger = logging.getLogger(__name__)
 def run_docling_conversion(
     file_path: Path,
     options: Optional[PipelineOptions] = None,
-    input_format: Optional[InputFormat] = None,  # Не используется, оставлен для обратной совместимости
     max_retries: int = 1,
     retry_delay: float = 1.0,
     check_limit: bool = False,
@@ -89,7 +87,6 @@ def run_docling_conversion(
     Args:
         file_path: Путь к файлу для обработки
         options: PipelineOptions для настройки Docling
-        input_format: InputFormat (опционально, определяется автоматически)
         max_retries: Максимальное количество попыток (по умолчанию 1, без retry)
         retry_delay: Задержка между попытками в секундах
         check_limit: Проверять ли лимит обработанных файлов
@@ -123,24 +120,15 @@ def run_docling_conversion(
     for attempt in range(max_retries + 1):
         try:
             # Создаем DocumentConverter с опциями
-            # Если options=None, используем опции по умолчанию (без параметров)
-            if options is not None:
-                # Extract format_options from PipelineOptions
-                from docling.document_converter import FormatOption
+            if options is not None and hasattr(options, 'pdf') and options.pdf is not None:
+                from docling.document_converter import PdfFormatOption
                 from docling.datamodel.base_models import InputFormat
-                format_options = {}
-                
-                # Handle PDF options
-                if hasattr(options, 'pdf') and options.pdf is not None:
-                    format_options[InputFormat.PDF] = FormatOption(
-                        pipeline_options=options.pdf,
-                        pipeline_cls=None,  # Use default pipeline class
-                        backend=None  # Use default backend
-                    )
-                
+
+                format_options = {
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=options.pdf)
+                }
                 converter = DocumentConverter(format_options=format_options)
             else:
-                # Используем опции по умолчанию
                 converter = DocumentConverter()
 
             # Логируем применяемые опции для диагностики
@@ -191,6 +179,9 @@ def run_batch_conversion(
     """
     Запускает конвертацию нескольких файлов.
 
+    .. deprecated::
+        Use DoclingPipeline.process_directory() instead for better control.
+
     Args:
         file_paths: Список путей к файлам
         options: PipelineOptions (общие для всех файлов)
@@ -199,6 +190,11 @@ def run_batch_conversion(
     Returns:
         Словарь {file_path: document} с результатами
     """
+    warnings.warn(
+        "run_batch_conversion() is deprecated. Use DoclingPipeline.process_directory() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     results = {}
 
     # Сбрасываем счетчики перед батчем (опционально, зависит от логики вызова)
