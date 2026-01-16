@@ -1,6 +1,7 @@
 """
 Classifier - классификация файлов и определение категорий обработки.
 """
+import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from collections import Counter
@@ -148,8 +149,8 @@ class Classifier:
                         data_paths = get_data_paths(check_date)
                         dated_input_dir = data_paths["input"]
                         check_patterns.append(str(dated_input_dir))
-                    except Exception:
-                        pass  # Игнорируем ошибки при получении путей
+                    except (KeyError, ValueError, TypeError):
+                        pass  # Игнорируем ошибки при получении путей для невалидных дат
                 
                 # Проверяем каждый путь (проверяем наличие паттернов в пути unit)
                 unit_path_str = str(unit_path_real)
@@ -530,8 +531,9 @@ class Classifier:
                         should_update_state = False
                     else:
                         should_update_state = True
-                except Exception:
-                    # Если не удалось загрузить manifest, обновляем состояние
+                except (json.JSONDecodeError, FileNotFoundError, KeyError, ValueError) as e:
+                    # Если не удалось загрузить manifest или state machine, обновляем состояние
+                    logger.debug(f"Could not load manifest for {unit_id}: {e}")
                     should_update_state = True
             else:
                 # Нет manifest - обновляем состояние

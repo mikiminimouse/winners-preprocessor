@@ -162,8 +162,8 @@ class ExtensionNormalizer:
                     classification = detection.get("classification")
                     if classification == "normalize":
                         files_requiring_normalization.append(file_path)
-                except Exception:
-                    pass
+                except (OSError, IOError, PermissionError, KeyError) as e:
+                    logger.debug(f"Could not detect file type for {file_path}: {e}")
             
             # Если есть файлы, требующие нормализации, но нормализация не удалась (есть ошибки и нет нормализованных файлов)
             if files_requiring_normalization and not normalized_files and errors:

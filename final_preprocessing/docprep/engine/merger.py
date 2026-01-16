@@ -7,6 +7,7 @@ Merger - объединение UNIT из Merge/Direct, Merge/Processed_1, Proce
 - Merge/Direct/ - для прямых файлов готовых к Docling (без обработки)
 - Merge/Processed_N/ - для обработанных units в цикле N
 """
+import json
 import shutil
 import logging
 from pathlib import Path
@@ -440,8 +441,8 @@ class Merger:
         if manifest_path.exists() and all_units[unit_id]["manifest"] is None:
             try:
                 all_units[unit_id]["manifest"] = load_manifest(unit_dir)
-            except Exception:
-                pass
+            except (json.JSONDecodeError, FileNotFoundError, KeyError) as e:
+                logger.debug(f"Could not load manifest for {unit_id}: {e}")
 
     def _get_target_subdir(
         self, file_type: str, files: List[Path], base_dir: Path, manifest: Optional[Dict] = None
@@ -608,7 +609,8 @@ class Merger:
                                     needs_ocr_detected = detection.get("needs_ocr", True)
                                     pdf_files_need_ocr.append(needs_ocr_detected)
                                     pdf_files_has_text.append(not needs_ocr_detected)
-                                except Exception:
+                                except (OSError, IOError, PermissionError, KeyError) as e:
+                                    logger.debug(f"Could not detect file type for {file_path_in_unit}: {e}")
                                     pdf_files_need_ocr.append(True)
                                     pdf_files_has_text.append(False)
             
@@ -628,7 +630,8 @@ class Merger:
                             needs_ocr_detected = detection.get("needs_ocr", True)
                             pdf_files_need_ocr.append(needs_ocr_detected)
                             pdf_files_has_text.append(not needs_ocr_detected)
-                        except Exception:
+                        except (OSError, IOError, PermissionError, KeyError) as e:
+                            logger.debug(f"Could not detect file type for {file_path}: {e}")
                             pdf_files_need_ocr.append(True)
                             pdf_files_has_text.append(False)
             

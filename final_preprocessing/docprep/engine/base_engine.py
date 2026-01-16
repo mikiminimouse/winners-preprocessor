@@ -60,7 +60,7 @@ class BaseEngine(ABC):
         
         Args:
             unit_path: Путь к юниту
-            reason: Причина перемещения (Empty, Special, Ambiguous, ErConvert, ErNormalaze, ErExtact)
+            reason: Причина перемещения (Empty, Special, Ambiguous, ErConvert, ErNormalize, ErExtract)
             cycle: Номер цикла
             exceptions_base: Базовая директория Exceptions
         

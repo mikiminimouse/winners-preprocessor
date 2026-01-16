@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
 from .state_machine import UnitState
+from .config import MAX_CYCLES
 
 
 def load_manifest(unit_path: Path) -> Dict[str, Any]:
@@ -153,7 +154,7 @@ def create_manifest_v2(
         },
         "processing": {
             "current_cycle": current_cycle,
-            "max_cycles": 3,
+            "max_cycles": MAX_CYCLES,
             "final_cluster": final_cluster or "",
             "final_reason": final_reason or "",
             "classifier_confidence": 1.0,

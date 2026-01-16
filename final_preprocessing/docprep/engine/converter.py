@@ -42,6 +42,12 @@ class Converter:
         "pptx": "pptx",
     }
 
+    # Константы для расчёта динамического timeout
+    # Формула: BASE + (file_size_mb * PER_MB), max = MAX
+    TIMEOUT_BASE_SECONDS = 60       # Базовый timeout для любого файла
+    TIMEOUT_PER_MB_SECONDS = 30     # Дополнительные секунды на каждый MB
+    TIMEOUT_MAX_SECONDS = 600       # Максимальный timeout (10 минут)
+
     def __init__(self, libreoffice_path: str = "libreoffice", use_headless: bool = False, mock_mode: bool = False):
         """
         Инициализирует Converter.
@@ -448,8 +454,8 @@ class Converter:
         """
         Вычисляет динамический timeout на основе размера файла.
 
-        Формула: 60 сек (базовый) + 30 сек на каждый MB
-        Минимум: 60 сек, Максимум: 600 сек (10 минут)
+        Формула: TIMEOUT_BASE_SECONDS + (file_size_mb * TIMEOUT_PER_MB_SECONDS)
+        Минимум: TIMEOUT_BASE_SECONDS, Максимум: TIMEOUT_MAX_SECONDS
 
         Args:
             file_size_mb: Размер файла в мегабайтах
@@ -457,12 +463,8 @@ class Converter:
         Returns:
             Timeout в секундах
         """
-        base_timeout = 60
-        per_mb_timeout = 30
-        max_timeout = 600
-
-        timeout = base_timeout + int(file_size_mb * per_mb_timeout)
-        return min(timeout, max_timeout)
+        timeout = self.TIMEOUT_BASE_SECONDS + int(file_size_mb * self.TIMEOUT_PER_MB_SECONDS)
+        return min(timeout, self.TIMEOUT_MAX_SECONDS)
 
     def _convert_file(
         self, file_path: Path, source_format: str, target_format: str, engine: str

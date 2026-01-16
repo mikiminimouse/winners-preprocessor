@@ -13,6 +13,7 @@ import sys
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
+import pytest
 
 # Настройка логирования
 logging.basicConfig(
@@ -107,8 +108,13 @@ def test_main_file_detection(unit_data: Dict[str, Any]) -> None:
         pytest.fail(f"Failed to detect main file: {e}")
 
 
+@pytest.mark.skip(reason="Requires real PDF files - use test_docling_pipeline.py for integration tests")
 def test_pipeline_processing(unit_path: Path, limit: int = 3) -> None:
-    """Тестирует полный pipeline обработки."""
+    """Тестирует полный pipeline обработки.
+
+    NOTE: This test requires real PDF files. For integration testing,
+    use scripts/test_docling_pipeline.py with real data.
+    """
     logger.info(f"Testing full pipeline processing (limit: {limit})")
     
     try:

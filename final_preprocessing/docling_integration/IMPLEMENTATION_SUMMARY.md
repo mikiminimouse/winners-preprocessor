@@ -2,8 +2,58 @@
 
 ## Статус: ✅ ВЫПОЛНЕНО
 
-**Дата:** 2025-01-XX  
-**Версия:** 1.0
+**Дата:** 2026-01-16
+**Версия:** 1.1.0
+
+---
+
+## Обновление 1.1.0: Оптимизация производительности
+
+### Изменения в config.py
+- Функция `_build_options_from_template()` теперь применяет **ВСЕ** настройки из YAML:
+  - `models.layout` - управление layout detection
+  - `models.tables` - управление table extraction
+  - `models.ocr` - настройки OCR
+  - `docling.images_scale` - масштаб изображений
+  - `docling.generate_page_images` / `generate_picture_images`
+  - `docling.extract_tables`
+
+### Оптимизированный pdf_text.yaml
+- `layout: off` - отключена модель publaynet_detectron2
+- `tables: off` - отключен table-transformer
+- `extract_tables: false` - отключено извлечение таблиц
+- `images_scale: 0.5` - уменьшен масштаб
+- `max_runtime_sec: 60` - уменьшен timeout
+
+### Новый pdf_text_tables.yaml
+Для документов с таблицами:
+- `layout: publaynet_detectron2` - включено
+- `tables: table-transformer` - включено
+- `extract_tables: true` - включено
+
+### Улучшенное логирование (runner.py)
+Добавлено логирование применяемых PDF опций для диагностики:
+```
+[pdf_text] Table extraction DISABLED (tables=False, extract_tables=False)
+[pdf_text] Layout detection DISABLED
+[pdf_text] PDF options: do_ocr=False, do_table_structure=False
+```
+
+### Результаты тестирования (2026-01-16)
+
+| Формат | Кол-во | Success | Время avg |
+|--------|--------|---------|-----------|
+| DOCX | 17 | 100% | **0.16 сек** |
+| XLSX | 1 | 100% | **0.34 сек** |
+| PDF (digital) | 5 | 100% | ~68 сек* |
+| Image OCR | 3 | 100% | 107 сек |
+
+*PDF время зависит от размера документа: от 12 сек (маленькие) до 200 сек (большие)
+
+### Известные ограничения
+1. Docling загружает OCR/layout модели при инициализации даже если они отключены
+2. XML формат (ODF) не поддерживается напрямую
+3. Сканированные PDF требуют OCR и медленны на CPU
 
 ---
 

@@ -51,7 +51,8 @@ def test_move_to_exceptions_new_structure():
         )
         
         # Проверяем, что UNIT перемещен в правильную директорию
-        expected_path = exceptions_dir / "Exceptions_1" / "ErConvert" / "UNIT_001"
+        # Для цикла 1 используется Direct, для циклов 2+ используется Processed_N
+        expected_path = exceptions_dir / "Direct" / "ErConvert" / "UNIT_001"
         assert target_path == expected_path
         assert target_path.exists()
         assert (target_path / "test.txt").exists()
@@ -76,7 +77,8 @@ def test_converter_error_routing():
 def test_extractor_error_routing():
     """Тест маршрутизации ошибок экстрактора."""
     # Verify that extractor uses the correct error directory name
-    assert "ErExtact" != "FailedExtraction"
+    from docprep.core.config import EXCEPTION_SUBDIRS
+    assert "ErExtract" in EXCEPTION_SUBDIRS
     # This test passes if we've successfully renamed the error directory
     pass
 
@@ -84,7 +86,8 @@ def test_extractor_error_routing():
 def test_normalizer_error_routing():
     """Тест маршрутизации ошибок нормализатора."""
     # Verify that normalizer would use the correct error directory name
-    assert "ErNormalaze" is not None
+    from docprep.core.config import EXCEPTION_SUBDIRS
+    assert "ErNormalize" in EXCEPTION_SUBDIRS
     # This test passes if the error directory name is defined
     pass
 
@@ -101,24 +104,19 @@ def test_directory_structure_creation():
         # Проверяем существование новых директорий
         exceptions_base = temp_dir / "2025-03-04" / "Exceptions"
         assert exceptions_base.exists()
-        
-        # Проверяем существование новых поддиректорий в Exceptions_1
-        exceptions_1 = exceptions_base / "Exceptions_1"
-        assert exceptions_1.exists()
-        
-        # Проверяем новые директории для ошибок
-        assert (exceptions_1 / "ErConvert").exists()
-        assert (exceptions_1 / "ErNormalaze").exists()
-        assert (exceptions_1 / "ErExtact").exists()
-        
-        # Проверяем существование ErMerge директории
-        er_merge_base = temp_dir / "2025-03-04" / "ErMerge"
-        assert er_merge_base.exists()
-        
-        # Проверяем поддиректории ErMerge
-        assert (er_merge_base / "Cycle_1").exists()
-        assert (er_merge_base / "Cycle_2").exists()
-        assert (er_merge_base / "Cycle_3").exists()
+
+        # Проверяем существование Direct директории (для цикла 1)
+        exceptions_direct = exceptions_base / "Direct"
+        assert exceptions_direct.exists()
+
+        # Проверяем существование Processed_1 директории
+        exceptions_processed_1 = exceptions_base / "Processed_1"
+        assert exceptions_processed_1.exists()
+
+        # Проверяем директории для ошибок в Processed_1
+        assert (exceptions_processed_1 / "ErConvert").exists()
+        assert (exceptions_processed_1 / "ErNormalize").exists()
+        assert (exceptions_processed_1 / "ErExtract").exists()
         
     finally:
         # Очищаем временную директорию
@@ -187,7 +185,8 @@ def test_empty_unit_routing():
         )
         
         # Проверяем, что UNIT перемещен в правильную директорию
-        expected_path = exceptions_dir / "Exceptions_1" / "Empty" / "UNIT_EMPTY"
+        # Для цикла 1 используется Direct
+        expected_path = exceptions_dir / "Direct" / "Empty" / "UNIT_EMPTY"
         assert target_path == expected_path
         assert target_path.exists()
         
@@ -213,22 +212,22 @@ def test_integration_all_error_routes():
         exceptions_base = date_dir / "Exceptions"
         assert exceptions_base.exists()
         
-        er_merge_base = date_dir / "ErMerge"
-        assert er_merge_base.exists()
-        
-        # Проверяем существование всех поддиректорий Exceptions
+        # ErMerge создаётся on-demand при ошибках финального merge, не в init_directory_structure
+        # Поэтому не проверяем её существование здесь
+
+        # Проверяем существование Direct директории для исключений до обработки
+        exceptions_direct = exceptions_base / "Direct"
+        assert exceptions_direct.exists()
+
+        # Проверяем существование Processed_N директорий для исключений после обработки
         for cycle in range(1, 4):
-            exceptions_cycle = exceptions_base / f"Exceptions_{cycle}"
-            assert exceptions_cycle.exists()
-            
-            # Проверяем все директории ошибок
-            error_dirs = ["Empty", "Special", "Ambiguous", "ErConvert", "ErNormalaze", "ErExtact"]
+            exceptions_processed = exceptions_base / f"Processed_{cycle}"
+            assert exceptions_processed.exists()
+
+            # Проверяем все директории ошибок (исправленные названия)
+            error_dirs = ["Empty", "Special", "Ambiguous", "ErConvert", "ErNormalize", "ErExtract"]
             for error_dir in error_dirs:
-                assert (exceptions_cycle / error_dir).exists()
-        
-        # Проверяем существование всех поддиректорий ErMerge
-        for cycle in range(1, 4):
-            assert (er_merge_base / f"Cycle_{cycle}").exists()
+                assert (exceptions_processed / error_dir).exists()
             
     finally:
         # Очищаем временную директорию
