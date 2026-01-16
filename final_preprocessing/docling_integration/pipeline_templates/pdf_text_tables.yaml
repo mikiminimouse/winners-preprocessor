@@ -1,0 +1,39 @@
+# Pipeline template for pdf_text_tables route
+# PDF documents with text layer that REQUIRE table extraction
+# Use this route when tables are important for the document
+# Performance: ~40-70 PDF/hour/CPU (slower than pdf_text)
+
+route: pdf_text_tables
+
+models:
+  layout: publaynet_detectron2  # Enabled for table detection
+  tables: table-transformer     # Enabled for table extraction
+  ocr: off                      # Not needed for pdf_text, text already in PDF
+
+performance:
+  threads: 4
+  batch_pages: 8
+
+docling:
+  parse_text: true
+  extract_tables: true    # ENABLED - tables are important
+  extract_figures: true   # ENABLED - figures may be important
+  do_caption_mentions: true
+  do_table_of_contents: true
+  preserve_layout: true
+  preserve_formatting: true
+  # Image settings
+  generate_page_images: false
+  generate_picture_images: false
+  images_scale: 1.0
+
+# Language settings for Russian text
+language:
+  primary: ru
+  fallback: en
+  encoding: utf-8
+
+processing_constraints:
+  allow_gpu: false
+  max_runtime_sec: 180   # Higher timeout for table processing
+  max_memory_mb: 4096    # More memory for table models
