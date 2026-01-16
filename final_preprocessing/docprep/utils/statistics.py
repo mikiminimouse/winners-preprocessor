@@ -68,17 +68,23 @@ def analyze_output_statistics(date: str) -> Dict[str, Any]:
     }
     
     # Собираем информацию из всех директорий
+    # НОВАЯ СТРУКТУРА v2:
+    # - Merge/Direct - для прямых файлов
+    # - Merge/Processed_N - для обработанных units
+    # - Exceptions/Direct - для исключений до обработки
+    # - Exceptions/Processed_N - для исключений после обработки
     search_dirs = [
         base_dir / "Processing" / "Processing_1",
         base_dir / "Processing" / "Processing_2",
         base_dir / "Processing" / "Processing_3",
-        base_dir / "Merge" / "Merge_0",
-        base_dir / "Merge" / "Merge_1",
-        base_dir / "Merge" / "Merge_2",
-        base_dir / "Merge" / "Merge_3",
-        base_dir / "Exceptions" / "Exceptions_1",
-        base_dir / "Exceptions" / "Exceptions_2",
-        base_dir / "Exceptions" / "Exceptions_3",
+        base_dir / "Merge" / "Direct",
+        base_dir / "Merge" / "Processed_1",
+        base_dir / "Merge" / "Processed_2",
+        base_dir / "Merge" / "Processed_3",
+        base_dir / "Exceptions" / "Direct",
+        base_dir / "Exceptions" / "Processed_1",
+        base_dir / "Exceptions" / "Processed_2",
+        base_dir / "Exceptions" / "Processed_3",
     ]
     
     for search_dir in search_dirs:

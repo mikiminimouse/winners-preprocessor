@@ -92,15 +92,18 @@ def run(
     typer.echo(f"{'='*60}")
 
     # Получаем правильные пути для merge директорий
+    # НОВАЯ СТРУКТУРА v2:
+    # - Merge/Direct/ - для прямых файлов готовых к Docling (без обработки)
+    # - Merge/Processed_N/ - для обработанных units в цикле N
     data_paths = get_data_paths(protocol_date)
     merge_dirs = []
-    
-    # Добавляем Merge_0/Direct для direct файлов из цикла 1
-    merge_0_direct = data_paths["merge"] / "Merge_0" / "Direct"
-    if merge_0_direct.exists():
-        merge_dirs.append(data_paths["merge"] / "Merge_0")
-    
-    # Добавляем все Merge_N (1, 2, 3)
+
+    # Добавляем Merge/Direct для direct файлов из цикла 1
+    merge_direct = data_paths["merge"] / "Direct"
+    if merge_direct.exists():
+        merge_dirs.append(merge_direct)
+
+    # Добавляем все Merge/Processed_N (1, 2, 3)
     for cycle_num in range(1, max_cycles + 1):
         cycle_paths = get_cycle_paths(
             cycle_num,

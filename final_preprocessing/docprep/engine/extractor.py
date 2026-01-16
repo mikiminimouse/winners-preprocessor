@@ -4,8 +4,9 @@ Extractor - безопасная разархивация архивов (ZIP, R
 import zipfile
 import subprocess
 import logging
+import hashlib
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 
 from ..core.manifest import load_manifest, save_manifest, update_manifest_operation
 from ..core.audit import get_audit_logger
@@ -16,7 +17,7 @@ from ..core.unit_processor import (
     update_unit_state,
     determine_unit_extension,
 )
-from ..core.config import get_cycle_paths, MERGE_DIR, get_data_paths
+from ..core.config import get_cycle_paths, MERGE_DIR, get_data_paths, EXCEPTION_SUBDIRS
 from ..utils.file_ops import detect_file_type, sanitize_filename
 from ..utils.paths import get_unit_files
 
@@ -139,7 +140,11 @@ class Extractor:
                 from ..core.config import EXCEPTIONS_DIR
                 exceptions_base = EXCEPTIONS_DIR
             
-            target_base_dir = exceptions_base / f"Exceptions_{cycle}" / "NoProcessableFiles"
+            # НОВАЯ СТРУКТУРА v2: Exceptions/Direct для цикла 1, Exceptions/Processed_N для остальных
+            if cycle == 1:
+                target_base_dir = exceptions_base / "Direct" / "NoProcessableFiles"
+            else:
+                target_base_dir = exceptions_base / f"Processed_{cycle}" / "NoProcessableFiles"
             
             # Перемещаем в Exceptions
             target_dir = move_unit_to_target(
@@ -226,7 +231,11 @@ class Extractor:
                 from ..core.config import EXCEPTIONS_DIR
                 exceptions_base = EXCEPTIONS_DIR
             
-            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "ErExtact"
+            # НОВАЯ СТРУКТУРА v2: Exceptions/Direct для цикла 1, Exceptions/Processed_N для остальных
+            if current_cycle == 1:
+                target_base_dir = exceptions_base / "Direct" / EXCEPTION_SUBDIRS["ErExtract"]
+            else:
+                target_base_dir = exceptions_base / f"Processed_{current_cycle}" / EXCEPTION_SUBDIRS["ErExtract"]
             
             # Перемещаем в Exceptions
             target_dir = move_unit_to_target(
@@ -269,7 +278,11 @@ class Extractor:
             save_manifest(unit_path, manifest)
 
         # Определяем расширение для сортировки из извлеченных файлов
-        extension = determine_unit_extension(unit_path)
+        # Для Mixed units используем "Mixed" вместо расширения файла
+        if manifest and manifest.get("is_mixed", False):
+            extension = "Mixed"
+        else:
+            extension = determine_unit_extension(unit_path)
 
         # Определяем следующий цикл (после извлечения переходим к следующему циклу)
         next_cycle = min(current_cycle + 1, 3)
@@ -385,12 +398,12 @@ class Extractor:
         flatten: bool,
     ) -> Dict[str, Any]:
         """
-        Извлекает один архив.
+        Извлекает один архив с рекурсивной распаковкой вложенных архивов.
 
         Args:
             archive_path: Путь к архиву
             extract_to: Директория для извлечения
-            max_depth: Максимальная глубина
+            max_depth: Максимальная глубина рекурсии
             keep_archive: Сохранять ли архив
             flatten: Размещать все в одной директории
 
@@ -401,6 +414,67 @@ class Extractor:
             QuarantineError: Если архив опасен (zip bomb)
             OperationError: Если извлечение не удалось
         """
+        # Используем set для отслеживания обработанных архивов (защита от циклов)
+        processed_hashes: Set[str] = set()
+
+        # Вызываем рекурсивную функцию с глубиной 0
+        extracted_files = self._extract_archive_recursive(
+            archive_path=archive_path,
+            extract_to=extract_to,
+            current_depth=0,
+            max_depth=max_depth,
+            keep_archive=keep_archive,
+            flatten=flatten,
+            processed_hashes=processed_hashes,
+        )
+
+        return {"files": extracted_files, "extract_dir": str(extract_to / f"{archive_path.stem}_extracted")}
+
+    def _extract_archive_recursive(
+        self,
+        archive_path: Path,
+        extract_to: Path,
+        current_depth: int,
+        max_depth: int,
+        keep_archive: bool,
+        flatten: bool,
+        processed_hashes: Set[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        Рекурсивно извлекает архив и вложенные архивы.
+
+        Args:
+            archive_path: Путь к архиву
+            extract_to: Директория для извлечения
+            current_depth: Текущая глубина рекурсии
+            max_depth: Максимальная глубина рекурсии
+            keep_archive: Сохранять ли архив
+            flatten: Размещать все в одной директории
+            processed_hashes: Set хэшей обработанных архивов (защита от циклов)
+
+        Returns:
+            Список извлеченных файлов (включая из вложенных архивов)
+
+        Raises:
+            QuarantineError: Если архив опасен (zip bomb)
+            OperationError: Если извлечение не удалось
+        """
+        # Проверяем глубину
+        if current_depth > max_depth:
+            logger.warning(f"Max depth {max_depth} reached, stopping recursion for {archive_path}")
+            return []
+
+        # Вычисляем SHA256 хэш архива для обнаружения дубликатов
+        try:
+            archive_hash = self._calculate_file_hash(archive_path)
+            if archive_hash in processed_hashes:
+                logger.warning(f"Circular dependency detected: {archive_path} already processed")
+                return []
+            processed_hashes.add(archive_hash)
+        except Exception as e:
+            logger.warning(f"Failed to calculate hash for {archive_path}: {e}")
+            # Продолжаем без проверки на дубликаты
+
         detection = detect_file_type(archive_path)
         archive_type = detection.get("detected_type")
 
@@ -409,11 +483,10 @@ class Extractor:
         extract_dir.mkdir(parents=True, exist_ok=True)
 
         max_size = self.MAX_UNPACK_SIZE_MB * 1024 * 1024
-        total_size = 0
-        file_count = 0
         extracted_files = []
 
         try:
+            # Извлекаем текущий архив
             if archive_type == "zip_archive" or archive_path.suffix.lower() == ".zip":
                 extracted_files = self._extract_zip(
                     archive_path, extract_dir, max_size, max_depth, flatten
@@ -442,11 +515,46 @@ class Extractor:
                     operation="extract",
                 )
 
+            # РЕКУРСИВНАЯ ЛОГИКА: Сканируем извлеченные файлы на наличие вложенных архивов
+            if current_depth < max_depth:
+                nested_archives = []
+                for file_info in extracted_files:
+                    file_path = Path(file_info["extracted_path"])
+                    if file_path.exists() and file_path.is_file():
+                        # Проверяем, является ли файл архивом
+                        file_detection = detect_file_type(file_path)
+                        file_extension = file_path.suffix.lower()
+                        archive_extensions = {".zip", ".rar", ".7z"}
+
+                        if (file_detection.get("is_archive") or
+                            file_detection.get("detected_type") in ["zip_archive", "rar_archive", "7z_archive"] or
+                            file_extension in archive_extensions):
+                            nested_archives.append(file_path)
+
+                # Рекурсивно извлекаем вложенные архивы
+                if nested_archives:
+                    logger.info(f"Found {len(nested_archives)} nested archives at depth {current_depth}")
+                    for nested_archive in nested_archives:
+                        try:
+                            nested_files = self._extract_archive_recursive(
+                                archive_path=nested_archive,
+                                extract_to=extract_dir,  # Извлекаем в ту же директорию
+                                current_depth=current_depth + 1,
+                                max_depth=max_depth,
+                                keep_archive=keep_archive,
+                                flatten=flatten,
+                                processed_hashes=processed_hashes,
+                            )
+                            extracted_files.extend(nested_files)
+                            logger.info(f"Extracted {len(nested_files)} files from nested archive {nested_archive.name}")
+                        except Exception as e:
+                            logger.error(f"Failed to extract nested archive {nested_archive}: {e}")
+
             # Удаляем исходный архив если не нужно сохранять
             if not keep_archive:
                 archive_path.unlink()
 
-            return {"files": extracted_files, "extract_dir": str(extract_dir)}
+            return extracted_files
 
         except QuarantineError:
             raise
@@ -456,6 +564,23 @@ class Extractor:
                 operation="extract",
                 operation_details={"exception": type(e).__name__},
             )
+
+    def _calculate_file_hash(self, file_path: Path) -> str:
+        """
+        Вычисляет SHA256 хэш файла.
+
+        Args:
+            file_path: Путь к файлу
+
+        Returns:
+            Hex-строка SHA256 хэша
+        """
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            # Читаем файл блоками для экономии памяти
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
 
     def _extract_zip(
         self, archive_path: Path, extract_dir: Path, max_size: int, max_depth: int, flatten: bool
@@ -496,12 +621,24 @@ class Extractor:
 
                 # Извлекаем файл
                 zip_ref.extract(member, extract_dir)
-                if target_path.exists():
+                if target_path.exists() and target_path.is_file():
+                    # Валидация извлеченного файла
+                    try:
+                        validation_result = detect_file_type(target_path)
+                        validated_type = validation_result.get("detected_type", "unknown")
+                        validation_passed = validated_type != "corrupted"
+                    except Exception as e:
+                        logger.warning(f"Validation failed for {target_path}: {e}")
+                        validated_type = "unknown"
+                        validation_passed = False
+
                     extracted_files.append(
                         {
                             "original_name": member,
                             "extracted_path": str(target_path),
                             "size": file_info.file_size,
+                            "validated_type": validated_type,
+                            "validation_passed": validation_passed,
                         }
                     )
 
@@ -545,12 +682,24 @@ class Extractor:
 
                 # Извлекаем файл
                 rar_ref.extract(member, extract_dir)
-                if target_path.exists():
+                if target_path.exists() and target_path.is_file():
+                    # Валидация извлеченного файла
+                    try:
+                        validation_result = detect_file_type(target_path)
+                        validated_type = validation_result.get("detected_type", "unknown")
+                        validation_passed = validated_type != "corrupted"
+                    except Exception as e:
+                        logger.warning(f"Validation failed for {target_path}: {e}")
+                        validated_type = "unknown"
+                        validation_passed = False
+
                     extracted_files.append(
                         {
                             "original_name": member.filename,
                             "extracted_path": str(target_path),
                             "size": member.file_size,
+                            "validated_type": validated_type,
+                            "validation_passed": validation_passed,
                         }
                     )
 
@@ -597,11 +746,24 @@ class Extractor:
                 if file_path.exists() and file_path.is_file():
                     # Получаем размер файла
                     file_size = file_path.stat().st_size
+
+                    # Валидация извлеченного файла
+                    try:
+                        validation_result = detect_file_type(file_path)
+                        validated_type = validation_result.get("detected_type", "unknown")
+                        validation_passed = validated_type != "corrupted"
+                    except Exception as e:
+                        logger.warning(f"Validation failed for {file_path}: {e}")
+                        validated_type = "unknown"
+                        validation_passed = False
+
                     extracted_files.append(
                         {
                             "original_name": filename,
                             "extracted_path": str(file_path),
                             "size": file_size,
+                            "validated_type": validated_type,
+                            "validation_passed": validation_passed,
                         }
                     )
 

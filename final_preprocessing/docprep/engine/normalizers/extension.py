@@ -15,7 +15,7 @@ from ...core.unit_processor import (
     update_unit_state,
     determine_unit_extension,
 )
-from ...core.config import get_cycle_paths, MERGE_DIR
+from ...core.config import get_cycle_paths, MERGE_DIR, EXCEPTION_SUBDIRS
 from ...utils.file_ops import detect_file_type
 
 logger = logging.getLogger(__name__)
@@ -181,7 +181,11 @@ class ExtensionNormalizer:
             else:
                 exceptions_base = EXCEPTIONS_DIR
             
-            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "ErNormalaze"
+            # НОВАЯ СТРУКТУРА v2: Exceptions/Direct для цикла 1, Exceptions/Processed_N для остальных
+            if current_cycle == 1:
+                target_base_dir = exceptions_base / "Direct" / EXCEPTION_SUBDIRS["ErNormalize"]
+            else:
+                target_base_dir = exceptions_base / f"Processed_{current_cycle}" / EXCEPTION_SUBDIRS["ErNormalize"]
             
             # Перемещаем в Exceptions
             target_dir = move_unit_to_target(
@@ -228,14 +232,18 @@ class ExtensionNormalizer:
             save_manifest(unit_path, manifest)
 
         # Определяем расширение для сортировки (используем detected_type после нормализации)
-        extension = None
-        if detected_types:
-            # Используем первый detected_type, убираем суффикс "_archive" если есть
-            first_type = detected_types[0]
-            if first_type:
-                extension = first_type.replace("_archive", "")
-        if not extension:
-            extension = determine_unit_extension(unit_path)
+        # Для Mixed units используем "Mixed" вместо расширения файла
+        if manifest and manifest.get("is_mixed", False):
+            extension = "Mixed"
+        else:
+            extension = None
+            if detected_types:
+                # Используем первый detected_type, убираем суффикс "_archive" если есть
+                first_type = detected_types[0]
+                if first_type:
+                    extension = first_type.replace("_archive", "")
+            if not extension:
+                extension = determine_unit_extension(unit_path)
 
         # Перемещаем НАПРЯМУЮ в Merge_N/Normalized/ (без Processing_N+1/Direct/)
         # Правильный путь: Data/YYYY-MM-DD/Merge, а не Data/Merge/YYYY-MM-DD

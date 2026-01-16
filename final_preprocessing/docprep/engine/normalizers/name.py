@@ -157,8 +157,10 @@ class NameNormalizer:
         Нормализует имя файла.
 
         Исправления:
+        - Удаление пробелов перед точкой расширения (file. doc → file.doc)
+        - Удаление множественных пробелов (file  name → file name)
         - Удаление двойных расширений (file.doc.docx → file.docx)
-        - Исправление смещённых точек (file.doc.txt → file.doc.txt нормализация)
+        - Удаление точек в начале/конце имени
 
         Args:
             filename: Исходное имя файла
@@ -166,7 +168,17 @@ class NameNormalizer:
         Returns:
             Нормализованное имя файла
         """
-        # Убираем двойные расширения
+        import re
+
+        # 1. Убираем пробелы перед точкой расширения
+        # Паттерн: один или более пробелов перед точкой
+        # Примеры: "file. doc" → "file.doc", "file  .doc" → "file.doc", "file.  doc" → "file.doc"
+        filename = re.sub(r'\s+\.', '.', filename)
+
+        # 2. Убираем множественные пробелы (заменяем на один пробел)
+        filename = re.sub(r'\s+', ' ', filename)
+
+        # 3. Убираем двойные расширения
         # Например: file.doc.docx → file.docx
         parts = filename.rsplit(".", 2)
         if len(parts) == 3:
@@ -184,10 +196,26 @@ class NameNormalizer:
                 "txt",
                 "zip",
                 "rar",
+                "7z",
             ]
             if ext1.lower() in common_extensions:
                 # Убираем первое расширение
                 filename = f"{name}.{ext2}"
 
+        # 4. Убираем точки в начале/конце имени
+        filename = filename.strip('.')
+
         return filename
+
+    def normalize_unit(
+        self,
+        unit_path: Path,
+        cycle: int,
+        protocol_date: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Alias для normalize_names для совместимости с другими engine-компонентами.
+        """
+        return self.normalize_names(unit_path, cycle, protocol_date, dry_run)
 

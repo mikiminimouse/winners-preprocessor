@@ -143,7 +143,10 @@ def get_main_file(unit_data: Dict[str, Any]) -> Optional[Path]:
     """
     Получает главный файл из UNIT для обработки.
 
-    Использует AST nodes для определения главного документа, если доступно.
+    Приоритет определения главного файла:
+    1. contract.source.original_filename (если есть)
+    2. AST nodes с role="document"
+    3. Первый файл с поддерживаемым расширением
 
     Args:
         unit_data: Данные UNIT из load_unit_from_ready2docling
@@ -164,22 +167,42 @@ def get_main_file(unit_data: Dict[str, Any]) -> Optional[Path]:
         f for f in files
         if f.name not in excluded_names
     ]
-    
+
     if not document_files:
         return None
 
-    # Пытаемся использовать AST nodes для определения главного файла
+    unit_path = unit_data.get("unit_path")
+
+    # Приоритет 1: Используем contract.source.original_filename
+    contract = unit_data.get("contract", {})
+    source = contract.get("source", {})
+    original_filename = source.get("original_filename")
+
+    if original_filename and unit_path:
+        # Ищем файл по имени из contract
+        for f in document_files:
+            if f.name == original_filename:
+                logger.debug(f"Found main file from contract.source: {f}")
+                return f
+        # Поиск рекурсивно если не нашли в списке files
+        for f in unit_path.rglob("*"):
+            if f.is_file() and f.name == original_filename and f.name not in excluded_names:
+                logger.debug(f"Found main file from contract.source (rglob): {f}")
+                return f
+
+    # Приоритет 2: AST nodes для определения главного файла
     ast_nodes = unit_data.get("ast_nodes", {})
     file_nodes = ast_nodes.get("files", [])
-    
+
     # Ищем файл с ролью "document" в AST nodes
     for file_node in file_nodes:
         if file_node.get("role") == "document":
             file_path = Path(file_node.get("path", ""))
             if file_path.exists() and file_path.name not in excluded_names:
+                logger.debug(f"Found main file from AST nodes: {file_path}")
                 return file_path
-    
-    # Если не нашли через AST, используем первый файл документа
+
+    # Приоритет 3: Первый файл документа с поддерживаемым расширением
     # Приоритет файлам с расширениями документов, поддерживаемыми Docling
     # Docling поддерживает: PDF, DOCX, XLSX, PPTX, HTML, XML, RTF, изображения (через OCR)
     # НЕ поддерживает: ZIP, RAR, 7Z, EXE и другие архивы/бинарники

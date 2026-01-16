@@ -15,6 +15,7 @@ from .runner import run_docling_conversion
 from .exporters.json import export_to_json
 from .exporters.markdown import export_to_markdown
 from .exporters.mongodb import export_to_mongodb
+from .constants import ROUTE_TO_EXTENSION, IMAGE_EXTENSIONS, normalize_extension
 
 logger = logging.getLogger(__name__)
 
@@ -82,44 +83,14 @@ class DoclingPipeline:
             extension = Path(filename).suffix.lstrip(".")
         
         if not extension:
-            # Fallback на route
+            # Fallback на route - используем централизованные константы
             routing = contract.get("routing", {})
             route = routing.get("docling_route", "")
-            # Маппинг route -> extension
-            route_to_ext = {
-                "pdf_text": "pdf",
-                "pdf_scan": "pdf",
-                "docx": "docx",
-                "xlsx": "xlsx",
-                "html": "html",
-                "xml": "xml",
-                "pptx": "pptx",
-                "rtf": "rtf",
-                "image_ocr": "image",
-            }
-            extension = route_to_ext.get(route, "other")
-        
-        # Нормализуем расширение (нижний регистр, убираем точку)
-        extension = extension.lower().lstrip(".")
-        
-        # Маппинг для группировки похожих форматов
-        extension_mapping = {
-            "jpg": "image",
-            "jpeg": "image",
-            "png": "image",
-            "tiff": "image",
-            "tif": "image",
-            "bmp": "image",
-            "gif": "image",
-        }
-        
-        # Применяем маппинг если нужно
-        mapped_extension = extension_mapping.get(extension, extension)
-        
-        # Если расширение пустое или неизвестное, используем other
-        if not mapped_extension:
-            mapped_extension = "other"
-        
+            extension = ROUTE_TO_EXTENSION.get(route, "other")
+
+        # Нормализуем расширение и группируем image форматы
+        mapped_extension = normalize_extension(extension)
+
         return Path(mapped_extension)
 
     def process_unit(self, unit_path: Path) -> Dict[str, Any]:

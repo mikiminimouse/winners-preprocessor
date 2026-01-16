@@ -1,7 +1,11 @@
 """
-Merger - объединение UNIT из Merge_1, Merge_2, Merge_3 в Ready2Docling.
+Merger - объединение UNIT из Merge/Direct, Merge/Processed_1, Processed_2, Processed_3 в Ready2Docling.
 
 Сборка финальных UNIT с дедупликацией и сортировкой по расширениям.
+
+НОВАЯ СТРУКТУРА v2:
+- Merge/Direct/ - для прямых файлов готовых к Docling (без обработки)
+- Merge/Processed_N/ - для обработанных units в цикле N
 """
 import shutil
 import logging
@@ -28,8 +32,16 @@ class Merger:
     def _move_skipped_unit(self, unit_id: str, source_path: Path, exceptions_base: Path, reason: str, cycle: int):
         """
         Перемещает UNIT в директорию исключений с указанием причины.
+
+        НОВАЯ СТРУКТУРА v2:
+        - Exceptions/Direct/ - для исключений до обработки (цикл 1)
+        - Exceptions/Processed_N/ - для исключений после обработки (цикл N)
         """
-        target_base_dir = exceptions_base / f"Exceptions_{cycle}" / reason
+        # Для цикла 1 используем Direct, для остальных Processed_N
+        if cycle == 1:
+            target_base_dir = exceptions_base / "Direct" / reason
+        else:
+            target_base_dir = exceptions_base / f"Processed_{cycle}" / reason
         try:
             target_path = move_unit_to_target(source_path, target_base_dir)
             logger.info(f"Unit {unit_id} moved to Exceptions/{reason} due to: {reason}")
@@ -85,8 +97,9 @@ class Merger:
         """
         Собирает UNIT из нескольких источников в целевую директорию.
 
+        НОВАЯ СТРУКТУРА v2:
         Args:
-            source_dirs: Список директорий источников (Merge_0/Direct, Merge_1, Merge_2, Merge_3)
+            source_dirs: Список директорий источников (Merge/Direct, Merge/Processed_1, Processed_2, Processed_3)
             target_dir: Целевая директория (Ready2Docling)
             cycle: Номер цикла (опционально, для фильтрации)
             er_merge_base: Базовая директория ErMerge (опционально)
@@ -103,18 +116,11 @@ class Merger:
             if not source_dir.exists():
                 continue
 
-            # Специальная обработка для Merge_0/Direct
-            merge_0_direct = source_dir / "Direct"
-            if "Merge_0" in str(source_dir) and merge_0_direct.exists():
-                # Обрабатываем Direct файлы из Merge_0
-                for unit_dir in merge_0_direct.rglob("UNIT_*"):
-                    if unit_dir.is_dir():
-                        self._process_unit_dir(unit_dir, source_dir.name, all_units)
-            else:
-                # Обычная обработка для других директорий
-                for unit_dir in source_dir.rglob("UNIT_*"):
-                    if unit_dir.is_dir():
-                        self._process_unit_dir(unit_dir, source_dir.name, all_units)
+            # Обрабатываем все директории рекурсивно
+            # Новая структура: Merge/Direct/, Merge/Processed_N/
+            for unit_dir in source_dir.rglob("UNIT_*"):
+                if unit_dir.is_dir():
+                    self._process_unit_dir(unit_dir, source_dir.name, all_units)
 
         # Определяем Exceptions base
         exceptions_base = target_dir.parent / "Exceptions"
@@ -363,6 +369,16 @@ class Merger:
                     unit_path=target_unit_dir,
                 )
 
+                # Удаляем исходную директорию UNIT после успешного копирования
+                # ВАЖНО: Это финальный merge, units должны перемещаться из Merge в Ready2Docling
+                source_unit_path = unit_info["source_path"]
+                if source_unit_path.exists():
+                    try:
+                        shutil.rmtree(source_unit_path)
+                        logger.debug(f"Removed source unit directory: {source_unit_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove source unit directory {source_unit_path}: {e}")
+
             except Exception as e:
                 errors.append({"unit_id": unit_id, "error": str(e)})
                 # Перемещаем UNIT в ErMerge при критических ошибках
@@ -384,7 +400,7 @@ class Merger:
         # Приоритет более поздним циклам
         if unit_id in all_units:
             # Если UNIT уже есть, проверяем, не является ли новый источник более приоритетным
-            # В списке source_dirs порядок: Merge_0, Merge_1, Merge_2, Merge_3
+            # В списке source_dirs порядок: Direct, Processed_1, Processed_2, Processed_3
             # Поэтому каждый следующий источник более приоритетен
             all_units[unit_id]["files"] = []  # Очищаем старые файлы
             all_units[unit_id]["manifest"] = None # Сбросим манифест для загрузки нового

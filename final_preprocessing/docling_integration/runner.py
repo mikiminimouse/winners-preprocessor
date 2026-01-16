@@ -5,71 +5,71 @@ Runner - тонкая обертка над DocumentConverter из Docling.
 """
 import logging
 import time
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-try:
-    # Импортируем установленный пакет docling напрямую
-    # ВАЖНО: Убеждаемся, что site-packages находится в начале sys.path
-    import sys
-    import importlib
-    import site
-    from pathlib import Path
-    
-    # Перемещаем site-packages в начало sys.path
-    site_dirs = []
-    for site_dir in site.getsitepackages():
-        if (Path(site_dir) / 'docling' / '__init__.py').exists():
-            if site_dir in sys.path:
-                sys.path.remove(site_dir)
-            sys.path.insert(0, site_dir)
-            site_dirs.append(site_dir)
-    
-    # Удаляем локальный модуль docling из sys.modules, если он там есть
-    _local_docling_backup = {}
-    if 'docling' in sys.modules:
-        mod = sys.modules['docling']
-        if hasattr(mod, '__file__') and mod.__file__:
-            mod_file = str(mod.__file__)
-            if 'final_preprocessing' in mod_file:
-                # Сохраняем локальные модули
-                _local_docling_backup = {
-                    k: v for k, v in sys.modules.items() 
-                    if k.startswith('docling')
-                }
-                # Удаляем их
-                for k in list(_local_docling_backup.keys()):
-                    sys.modules.pop(k, None)
-    
-    # Импортируем установленный пакет
-    document_converter_mod = importlib.import_module('docling.document_converter')
-    DocumentConverter = document_converter_mod.DocumentConverter
-    
-    pipeline_options_mod = importlib.import_module('docling.datamodel.pipeline_options')
-    PipelineOptions = pipeline_options_mod.PipelineOptions
-    
-    base_models_mod = importlib.import_module('docling.datamodel.base_models')
-    InputFormat = base_models_mod.InputFormat
-    
-    DOCLING_AVAILABLE = True
-except (ImportError, Exception):
-    DOCLING_AVAILABLE = False
-    DocumentConverter = None
-    PipelineOptions = None
-    InputFormat = None
+# Используем централизованный импорт Docling из _docling_import.py
+from ._docling_import import (
+    get_document_converter,
+    get_pipeline_options,
+    get_input_format,
+    is_docling_available,
+)
+
+# Получаем классы через shared модуль
+DocumentConverter = get_document_converter()
+PipelineOptions = get_pipeline_options()
+InputFormat = get_input_format()
+DOCLING_AVAILABLE = is_docling_available()
 
 
-# Global counter for processed units per format
-PROCESSED_COUNTS = {}
+class ProcessedCountsManager:
+    """
+    Потокобезопасный менеджер счетчиков обработанных файлов.
+
+    Использует threading.Lock для защиты от race conditions
+    при параллельной обработке.
+    """
+
+    def __init__(self):
+        self._counts: Dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def get(self, format_name: str) -> int:
+        """Возвращает количество обработанных файлов для формата."""
+        with self._lock:
+            return self._counts.get(format_name, 0)
+
+    def increment(self, format_name: str) -> int:
+        """Атомарно увеличивает счетчик и возвращает новое значение."""
+        with self._lock:
+            self._counts[format_name] = self._counts.get(format_name, 0) + 1
+            return self._counts[format_name]
+
+    def reset(self):
+        """Сбрасывает все счетчики."""
+        with self._lock:
+            self._counts.clear()
+
+    def get_all(self) -> Dict[str, int]:
+        """Возвращает копию всех счетчиков."""
+        with self._lock:
+            return self._counts.copy()
+
+
+# Глобальный экземпляр менеджера счетчиков
+_processed_counts_manager = ProcessedCountsManager()
+
 
 def get_processed_count(format_name: str) -> int:
     """Returns the number of processed files for a given format."""
-    return PROCESSED_COUNTS.get(format_name, 0)
+    return _processed_counts_manager.get(format_name)
+
 
 def reset_processed_counts():
     """Resets all processed counts."""
-    global PROCESSED_COUNTS
-    PROCESSED_COUNTS = {}
+    _processed_counts_manager.reset()
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ def run_docling_conversion(
     # Проверка лимита (по расширению файла как прокси для формата)
     if check_limit:
         ext = file_path.suffix.lower().lstrip('.')
-        current_count = PROCESSED_COUNTS.get(ext, 0)
+        current_count = _processed_counts_manager.get(ext)
         if current_count >= limit_per_format:
             logger.info(f"Skipping {file_path}: limit of {limit_per_format} reached for format {ext}")
             return None
@@ -143,6 +143,14 @@ def run_docling_conversion(
                 # Используем опции по умолчанию
                 converter = DocumentConverter()
 
+            # Логируем применяемые опции для диагностики
+            if options is not None and hasattr(options, 'pdf') and options.pdf is not None:
+                pdf_opts = options.pdf
+                logger.info(f"PDF options applied: do_ocr={pdf_opts.do_ocr}, "
+                           f"do_table_structure={pdf_opts.do_table_structure}, "
+                           f"images_scale={getattr(pdf_opts, 'images_scale', 'default')}, "
+                           f"generate_page_images={getattr(pdf_opts, 'generate_page_images', 'default')}")
+
             # Запускаем конвертацию
             if attempt > 0:
                 logger.info(f"Retrying conversion (attempt {attempt + 1}/{max_retries + 1}) for {file_path}")
@@ -155,7 +163,7 @@ def run_docling_conversion(
             # Увеличиваем счетчик обработанных файлов, если успешно
             if check_limit:
                 ext = file_path.suffix.lower().lstrip('.')
-                PROCESSED_COUNTS[ext] = PROCESSED_COUNTS.get(ext, 0) + 1
+                _processed_counts_manager.increment(ext)
 
             logger.info(f"Successfully converted {file_path}")
             return document

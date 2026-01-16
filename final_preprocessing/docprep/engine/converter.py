@@ -146,7 +146,11 @@ class Converter:
                 from ..core.config import EXCEPTIONS_DIR
                 exceptions_base = EXCEPTIONS_DIR
             
-            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "NoProcessableFiles"
+            # НОВАЯ СТРУКТУРА v2: Exceptions/Direct для цикла 1, Exceptions/Processed_N для остальных
+            if current_cycle == 1:
+                target_base_dir = exceptions_base / "Direct" / "NoProcessableFiles"
+            else:
+                target_base_dir = exceptions_base / f"Processed_{current_cycle}" / "NoProcessableFiles"
             
             # Перемещаем в Exceptions
             target_dir = move_unit_to_target(
@@ -189,61 +193,87 @@ class Converter:
         errors = []
         target_format_used = None
 
-        for file_path, source_format, target_format in files_to_convert:
-            try:
-                if dry_run:
-                    # В dry_run режиме только логируем
-                    logger.info(f"[DRY RUN] Would convert {file_path.name} from {source_format} to {target_format}")
-                    converted_files.append({
-                        "original_file": str(file_path),
-                        "output_path": str(file_path.parent / (file_path.stem + "." + target_format)),
-                        "source_format": source_format,
-                        "target_format": target_format,
-                        "success": True,
-                    })
-                    target_format_used = target_format
-                else:
-                    result = self._convert_file(file_path, source_format, target_format, engine)
-                    if result.get("success"):
-                        converted_files.append(result)
-                        target_format_used = target_format  # Используем последний целевой формат
+        # МНОГОПОТОЧНАЯ КОНВЕРТАЦИЯ
+        if dry_run:
+            # В dry_run режиме обрабатываем последовательно (без многопоточности)
+            for file_path, source_format, target_format in files_to_convert:
+                logger.info(f"[DRY RUN] Would convert {file_path.name} from {source_format} to {target_format}")
+                converted_files.append({
+                    "original_file": str(file_path),
+                    "output_path": str(file_path.parent / (file_path.stem + "." + target_format)),
+                    "source_format": source_format,
+                    "target_format": target_format,
+                    "success": True,
+                })
+                target_format_used = target_format
+        else:
+            # Реальная конвертация с многопоточностью
+            from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                # Обновляем manifest
-                if manifest:
-                    operation = {
-                        "type": "convert",
-                        "status": "success",
-                        "from": source_format,
-                        "to": target_format,
-                        "cycle": current_cycle,
-                        "tool": engine,
-                        "original_file": str(file_path.name),
-                        "converted_file": str(Path(result.get("output_path")).name),
-                    }
-                    manifest = update_manifest_operation(manifest, operation)
-                    
-                    # Обновляем информацию о файле в manifest
-                    files = manifest.get("files", [])
-                    for file_info in files:
-                        if file_info.get("original_name") == file_path.name or file_info.get("current_name") == file_path.name:
-                            # Обновляем current_name на конвертированный файл
-                            file_info["current_name"] = Path(result.get("output_path")).name
-                            file_info["detected_type"] = target_format
-                            # Добавляем информацию о трансформации
-                            if "transformations" not in file_info:
-                                file_info["transformations"] = []
-                            file_info["transformations"].append({
-                                "type": "convert",
-                                "from": source_format,
-                                "to": target_format,
-                                "cycle": current_cycle,
-                            })
-                            break
-                    else:
-                        errors.append({"file": str(file_path), "error": "Conversion failed"})
-            except Exception as e:
-                errors.append({"file": str(file_path), "error": str(e)})
-                logger.error(f"Failed to convert {file_path}: {e}")
+            # Ограничиваем количество параллельных конвертаций (не более 4 или количества файлов)
+            max_workers = min(4, len(files_to_convert))
+            logger.info(f"Starting parallel conversion with {max_workers} workers for {len(files_to_convert)} files")
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Создаем задачи для каждого файла
+                future_to_file = {
+                    executor.submit(
+                        self._convert_file,
+                        file_path,
+                        source_format,
+                        target_format,
+                        engine
+                    ): (file_path, source_format, target_format)
+                    for file_path, source_format, target_format in files_to_convert
+                }
+
+                # Обрабатываем результаты по мере завершения
+                for future in as_completed(future_to_file):
+                    file_path, source_format, target_format = future_to_file[future]
+                    try:
+                        result = future.result()
+                        if result.get("success"):
+                            converted_files.append(result)
+                            target_format_used = target_format
+
+                            # Обновляем manifest
+                            if manifest:
+                                operation = {
+                                    "type": "convert",
+                                    "status": "success",
+                                    "from": source_format,
+                                    "to": target_format,
+                                    "cycle": current_cycle,
+                                    "tool": engine,
+                                    "original_file": str(file_path.name),
+                                    "converted_file": str(Path(result.get("output_path")).name),
+                                    "validated": result.get("validated", False),
+                                    "validated_type": result.get("validated_type"),
+                                }
+                                manifest = update_manifest_operation(manifest, operation)
+
+                                # Обновляем информацию о файле в manifest
+                                files = manifest.get("files", [])
+                                for file_info in files:
+                                    if file_info.get("original_name") == file_path.name or file_info.get("current_name") == file_path.name:
+                                        # Обновляем current_name на конвертированный файл
+                                        file_info["current_name"] = Path(result.get("output_path")).name
+                                        file_info["detected_type"] = target_format
+                                        # Добавляем информацию о трансформации
+                                        if "transformations" not in file_info:
+                                            file_info["transformations"] = []
+                                        file_info["transformations"].append({
+                                            "type": "convert",
+                                            "from": source_format,
+                                            "to": target_format,
+                                            "cycle": current_cycle,
+                                        })
+                                        break
+                        else:
+                            errors.append({"file": str(file_path), "error": "Conversion returned success=False"})
+                    except Exception as e:
+                        errors.append({"file": str(file_path), "error": str(e)})
+                        logger.error(f"Failed to convert {file_path}: {e}")
 
         # Если не было успешных конвертаций, перемещаем в Exceptions
         if not converted_files and not dry_run:
@@ -257,7 +287,11 @@ class Converter:
                 from ..core.config import EXCEPTIONS_DIR
                 exceptions_base = EXCEPTIONS_DIR
             
-            target_base_dir = exceptions_base / f"Exceptions_{current_cycle}" / "ErConvert"
+            # НОВАЯ СТРУКТУРА v2: Exceptions/Direct для цикла 1, Exceptions/Processed_N для остальных
+            if current_cycle == 1:
+                target_base_dir = exceptions_base / "Direct" / "ErConvert"
+            else:
+                target_base_dir = exceptions_base / f"Processed_{current_cycle}" / "ErConvert"
             
             # Перемещаем в Exceptions
             target_dir = move_unit_to_target(
@@ -303,7 +337,11 @@ class Converter:
         next_cycle = min(current_cycle + 1, 3)
 
         # Определяем расширение для сортировки (используем целевой формат после конвертации)
-        extension = target_format_used if target_format_used else determine_unit_extension(unit_path)
+        # Для Mixed units используем "Mixed" вместо расширения файла
+        if manifest and manifest.get("is_mixed", False):
+            extension = "Mixed"
+        else:
+            extension = target_format_used if target_format_used else determine_unit_extension(unit_path)
 
         # Перемещаем НАПРЯМУЮ в Merge_N/Converted/ (без Processing_N+1/Direct/)
         # Правильный путь: Data/YYYY-MM-DD/Merge, а не Data/Merge/YYYY-MM-DD
@@ -406,6 +444,26 @@ class Converter:
             "extension": extension,
         }
 
+    def _calculate_timeout(self, file_size_mb: float) -> int:
+        """
+        Вычисляет динамический timeout на основе размера файла.
+
+        Формула: 60 сек (базовый) + 30 сек на каждый MB
+        Минимум: 60 сек, Максимум: 600 сек (10 минут)
+
+        Args:
+            file_size_mb: Размер файла в мегабайтах
+
+        Returns:
+            Timeout в секундах
+        """
+        base_timeout = 60
+        per_mb_timeout = 30
+        max_timeout = 600
+
+        timeout = base_timeout + int(file_size_mb * per_mb_timeout)
+        return min(timeout, max_timeout)
+
     def _convert_file(
         self, file_path: Path, source_format: str, target_format: str, engine: str
     ) -> Dict[str, Any]:
@@ -457,6 +515,11 @@ class Converter:
 
         # Конвертация через LibreOffice в headless режиме
         try:
+            # Вычисляем динамический timeout на основе размера файла
+            file_size_mb = file_path.stat().st_size / (1024 * 1024)
+            dynamic_timeout = self._calculate_timeout(file_size_mb)
+            logger.info(f"Converting {file_path.name} ({file_size_mb:.2f} MB) with timeout {dynamic_timeout}s")
+
             cmd = [
                 self.libreoffice_path,
                 "--headless",
@@ -468,7 +531,7 @@ class Converter:
             ]
 
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300  # 5 минут таймаут
+                cmd, capture_output=True, text=True, timeout=dynamic_timeout
             )
 
             if result.returncode != 0:
@@ -506,7 +569,42 @@ class Converter:
                             operation="convert",
                         )
 
-            # Удаляем исходный файл после успешной конвертации
+            # ВАЛИДАЦИЯ конвертированного файла через magic bytes
+            validation_result = detect_file_type(output_path)
+            validated_type = validation_result.get("detected_type", "")
+
+            # Определяем ожидаемые типы для каждого целевого формата
+            expected_types = {
+                "docx": ["docx"],
+                "xlsx": ["xlsx"],
+                "pptx": ["pptx"],
+                "pdf": ["pdf"],
+            }
+            expected_list = expected_types.get(target_format, [target_format])
+
+            if validated_type not in expected_list:
+                # Валидация провалилась - удаляем некорректный файл
+                if output_path.exists():
+                    try:
+                        output_path.unlink()
+                        logger.warning(f"Deleted invalid converted file: {output_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete invalid file {output_path}: {e}")
+
+                raise OperationError(
+                    f"Converted file validation failed: expected {target_format}, got {validated_type}",
+                    operation="convert",
+                    operation_details={
+                        "expected_format": target_format,
+                        "detected_format": validated_type,
+                        "validation_result": validation_result,
+                        "file_path": str(output_path),
+                    }
+                )
+
+            logger.info(f"✅ Validation passed: {output_path.name} is valid {validated_type}")
+
+            # Удаляем исходный файл после успешной конвертации и валидации
             if file_path.exists() and output_path.exists():
                 try:
                     file_path.unlink()
@@ -519,6 +617,8 @@ class Converter:
                 "source_format": source_format,
                 "target_format": target_format,
                 "success": True,
+                "validated": True,
+                "validated_type": validated_type,
             }
 
         except subprocess.TimeoutExpired:

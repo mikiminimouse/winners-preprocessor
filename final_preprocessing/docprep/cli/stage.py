@@ -69,9 +69,9 @@ def stage_pending(
 ):
     """
     Обработать все Processing_N.
-    
+
     Обрабатывает все UNIT в поддиректориях Convert, Extract, Normalize.
-    Примечание: Direct файлы не проходят через Processing, они идут напрямую в Merge_0/Direct/ после классификации.
+    Примечание: Direct файлы не проходят через Processing, они идут напрямую в Merge/Direct/ после классификации.
     """
     if not pending_dir.exists():
         typer.echo(f"❌ Директория не найдена: {pending_dir}", err=True)
@@ -178,9 +178,10 @@ def stage_merge(
     cycle_paths = get_cycle_paths(cycle, None, merge_base, None)
     
     # Определяем категорию Merge на основе исходной директории
-    # Merge_0: Direct файлы (уже там после классификации, merge не нужен)
-    # Merge_1, Merge_2, Merge_3: Converted, Extracted, Normalized (из Processing_N после обработки)
-    
+    # НОВАЯ СТРУКТУРА v2:
+    # - Merge/Direct: Direct файлы (уже там после классификации, merge не нужен)
+    # - Merge/Processed_N: Converted, Extracted, Normalized (из Processing_N после обработки)
+
     # Определяем категорию по пути
     merge_category = None
     source_str = str(source_dir)
@@ -192,9 +193,9 @@ def stage_merge(
         merge_category = "Normalized"
     elif "Direct" in source_str:
         # Direct файлы НЕ должны попадать в merge из Processing_N
-        # Они идут напрямую в Merge_0/Direct/ после классификации в цикле 1
+        # Они идут напрямую в Merge/Direct/ после классификации в цикле 1
         # Если кто-то пытается сделать merge Direct файлов, это ошибка
-        typer.echo(f"⚠️  Direct файлы не должны попадать в merge из Processing_N. Они идут напрямую в Merge_0/Direct/", err=True)
+        typer.echo(f"⚠️  Direct файлы не должны попадать в merge из Processing_N. Они идут напрямую в Merge/Direct/", err=True)
         return
     else:
         # Если не удалось определить, пытаемся из manifest

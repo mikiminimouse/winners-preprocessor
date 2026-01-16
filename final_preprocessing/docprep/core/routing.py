@@ -177,6 +177,15 @@ def determine_route_from_files(files: list) -> str:
     for f in files:
         detected_type = f.get("detected_type", "unknown")
         route = determine_route(detected_type)
+
+        # Для PDF учитываем needs_ocr для определения scan vs text
+        if detected_type == "pdf":
+            needs_ocr = f.get("needs_ocr", False)
+            if needs_ocr:
+                route = "pdf_scan"
+            else:
+                route = "pdf_text"
+
         if route != "unknown":
             found_routes.add(route)
     

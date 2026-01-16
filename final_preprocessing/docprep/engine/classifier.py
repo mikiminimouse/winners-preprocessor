@@ -83,6 +83,9 @@ class Classifier:
         """
         Классифицирует UNIT, создает manifest, перемещает UNIT в целевую директорию и обновляет state.
 
+        NOTE: Ready2Docling - это отдельный этап, запускаемый через merge2docling.
+              Direct units из ВСЕХ циклов идут в единую директорию Merge/Direct/.
+
         Args:
             unit_path: Путь к директории UNIT
             cycle: Номер цикла (1, 2, 3)
@@ -229,10 +232,10 @@ class Classifier:
                         "file_count": 0,
                         "reason": "empty_unit",
                     },
-                    final_cluster=f"Exceptions_{cycle}",
+                    final_cluster="Exceptions/Direct" if cycle == 1 else f"Exceptions/Processed_{cycle}",
                     final_reason="Empty unit with no files",
                 )
-                
+
                 # Логируем классификацию
                 self.audit_logger.log_event(
                     unit_id=unit_id,
@@ -245,7 +248,7 @@ class Classifier:
                         "file_count": 0,
                         "reason": "empty_unit",
                         "target_directory": str(target_dir),
-                        "final_cluster": f"Exceptions_{cycle}",
+                        "final_cluster": "Exceptions/Direct" if cycle == 1 else f"Exceptions/Processed_{cycle}",
                         "final_reason": "Empty unit with no files",
                     },
                     state_before="RAW",
@@ -354,89 +357,66 @@ class Classifier:
         target_base_dir = self._get_target_directory_base(unit_category, cycle, protocol_date)
         
         # Обрабатываем случай direct в циклах 2-3 (UNIT уже обработан, готов к merge)
+        # NOTE: Ready2Docling - это отдельный этап (merge2docling), здесь units идут в Merge
         if unit_category == "direct" and cycle > 1:
             # UNIT уже обработан и готов к merge - переводим в MERGED_PROCESSED
-            from ..core.state_machine import UnitStateMachine
-            state_machine = UnitStateMachine(unit_id, manifest_path)
-            current_state = state_machine.get_current_state()
-            
-            if current_state == UnitState.CLASSIFIED_2:
-                from ..core.config import get_data_paths, READY2DOCLING_DIR
-                if protocol_date:
-                    data_paths = get_data_paths(protocol_date)
-                    ready_base = data_paths.get("ready2docling", READY2DOCLING_DIR)
-                else:
-                    ready_base = READY2DOCLING_DIR
-                
-                # Перемещаем в Ready2Docling
-                target_dir = move_unit_to_target(
-                    unit_dir=unit_path,
-                    target_base_dir=ready_base,
-                    extension=extension,
-                    dry_run=dry_run,
-                    copy_mode=copy_mode,
-                )
-                
-                if not dry_run:
-                    # Обновляем route
-                    self._update_manifest_route(target_dir, current_route)
+            # Direct файлы ВСЕГДА идут в Merge/Direct/ (единственная директория Direct в Merge)
+            from ..core.config import get_data_paths
+            data_paths = get_data_paths(protocol_date)
+            target_base_dir = data_paths["merge"] / "Direct"
 
-                    # Сначала переводим в MERGED_PROCESSED, затем в READY_FOR_DOCLING
-                    update_unit_state(
-                        unit_path=target_dir,
-                        new_state=UnitState.MERGED_PROCESSED,
-                        cycle=cycle,
-                        operation={
-                            "type": "classify",
-                            "status": "success",
-                            "category": unit_category,
-                            "ready_for_docling": True,
-                            "file_count": len(files),
-                        },
-                    )
-                    # Затем переводим в READY_FOR_DOCLING
-                    update_unit_state(
-                        unit_path=target_dir,
-                        new_state=UnitState.READY_FOR_DOCLING,
-                        cycle=cycle,
-                        operation={
-                            "type": "classify",
-                            "status": "success",
-                            "category": unit_category,
-                            "ready_for_docling": True,
-                            "file_count": len(files),
-                        },
-                    )
-                    new_state = UnitState.READY_FOR_DOCLING
-                else:
-                    new_state = UnitState.READY_FOR_DOCLING
-                
-                # Логируем операцию
-                self.audit_logger.log_event(
-                    unit_id=unit_id,
-                    event_type="operation",
-                    operation="classify",
-                    details={
-                        "cycle": cycle,
-                        "category": unit_category,
-                        "is_mixed": False,
-                        "file_count": len(files),
-                        "target_directory": str(target_dir),
-                        "ready_for_docling": True,
-                    },
-                    state_before=manifest.get("state_machine", {}).get("current_state") if manifest else "CLASSIFIED_2",
-                    state_after=new_state.value,
+            target_dir = move_unit_to_target(
+                unit_dir=unit_path,
+                target_base_dir=target_base_dir,
+                extension=extension,
+                dry_run=dry_run,
+                copy_mode=copy_mode,
+            )
+
+            if not dry_run:
+                self._update_manifest_route(target_dir, current_route)
+
+                # Определяем состояние: Cycle 2+: MERGED_PROCESSED
+                new_state = UnitState.MERGED_PROCESSED
+
+                update_unit_state(
                     unit_path=target_dir,
+                    new_state=new_state,
+                    cycle=cycle,
+                    operation={
+                        "type": "classify",
+                        "status": "success",
+                        "category": unit_category,
+                        "file_count": len(files),
+                    },
                 )
-                
-                return {
+            else:
+                new_state = UnitState.MERGED_PROCESSED
+
+            self.audit_logger.log_event(
+                unit_id=unit_id,
+                event_type="operation",
+                operation="classify",
+                details={
+                    "cycle": cycle,
                     "category": unit_category,
-                    "unit_category": unit_category,
                     "is_mixed": False,
-                    "file_classifications": classifications_by_file,
+                    "file_count": len(files),
                     "target_directory": str(target_dir),
-                    "moved_to": str(target_dir),
-                }
+                },
+                state_before=manifest.get("state_machine", {}).get("current_state") if manifest else "CLASSIFIED_2",
+                state_after=new_state.value,
+                unit_path=target_dir,
+            )
+
+            return {
+                "category": unit_category,
+                "unit_category": unit_category,
+                "is_mixed": False,
+                "file_classifications": classifications_by_file,
+                "target_directory": str(target_dir),
+                "moved_to": str(target_dir),
+            }
 
         # Создаем manifest если его нет
         if not manifest:
@@ -471,7 +451,7 @@ class Classifier:
 
         # Перемещаем UNIT в целевую директорию (с учетом расширения)
         if unit_category == "direct" and cycle == 1:
-            # Direct файлы идут НАПРЯМУЮ в Merge_0/Direct/ (без Processing)
+            # Direct файлы идут НАПРЯМУЮ в Merge/Direct/ (без Processing)
             target_dir = move_unit_to_target(
                 unit_dir=unit_path,
                 target_base_dir=target_base_dir,
@@ -859,6 +839,7 @@ class Classifier:
         Определяет базовую целевую директорию для UNIT на основе категории.
 
         Расширение будет добавлено позже через move_unit_to_target.
+        NOTE: Ready2Docling - это отдельный этап (merge2docling).
 
         Args:
             category: Категория UNIT
@@ -876,22 +857,26 @@ class Classifier:
             data_paths = get_data_paths()
 
         # Определяем базовую директорию в зависимости от категории
-        if category in ["special", "unknown", "empty"]:  # ИСПРАВЛЕНИЕ: убрали "mixed" - он обрабатывается через routing
+        # СТРУКТУРА:
+        # - Exceptions/Direct/ - для исключений до обработки (цикл 1)
+        # - Exceptions/Processed_N/ - для исключений после обработки (цикл N)
+        # - Merge/Direct/ - для ВСЕХ direct файлов готовых к Docling (все циклы)
+        # - Merge/Processed_N/ - для обработанных units (Converted, Extracted, Normalized, Mixed)
+
+        if category in ["special", "unknown", "empty"]:
             # Exceptions находится внутри директории с датой
             exceptions_base = data_paths["exceptions"]
-            return exceptions_base / f"Exceptions_{cycle}"
-        elif category == "direct":
-            # Direct файлы идут НАПРЯМУЮ в Merge_0/Direct/ (только цикл 1)
             if cycle == 1:
-                merge_base = data_paths["merge"]
-                return merge_base / "Merge_0" / "Direct"
+                # Исключения до обработки идут в Exceptions/Direct/
+                return exceptions_base / "Direct"
             else:
-                # В циклах 2-3 direct файлов быть не должно
-                # Если UNIT классифицируется как direct в цикле 2-3, это означает,
-                # что он уже обработан и готов к merge (MERGED_PROCESSED)
-                # Не создаем Merge_N/Direct, а оставляем в текущем Merge_N или переводим в Ready2Docling
-                # Возвращаем None, чтобы обработать это в основной логике
-                return None
+                # Исключения после обработки идут в Exceptions/Processed_N/
+                return exceptions_base / f"Processed_{cycle}"
+        elif category == "direct":
+            merge_base = data_paths["merge"]
+            # Direct файлы ВСЕГДА идут в Merge/Direct/ независимо от цикла
+            # Это единственная директория Direct в ветке Merge (как в Exceptions)
+            return merge_base / "Direct"
         else:
             # Processing категории (convert, extract, normalize)
             processing_base = data_paths["processing"]

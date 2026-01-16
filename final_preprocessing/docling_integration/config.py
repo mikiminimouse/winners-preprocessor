@@ -7,61 +7,25 @@
 import os
 import logging
 import yaml
-from typing import Dict, Any, Optional
+from functools import lru_cache
+from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 
-try:
-    # Импортируем установленный пакет docling напрямую
-    # ВАЖНО: Убеждаемся, что site-packages находится в начале sys.path
-    import sys
-    import importlib
-    import site
-    
-    # Перемещаем site-packages в начало sys.path
-    site_dirs = []
-    for site_dir in site.getsitepackages():
-        if (Path(site_dir) / 'docling' / '__init__.py').exists():
-            if site_dir in sys.path:
-                sys.path.remove(site_dir)
-            sys.path.insert(0, site_dir)
-            site_dirs.append(site_dir)
-    
-    # Удаляем локальный модуль docling из sys.modules, если он там есть
-    _local_docling_backup = {}
-    if 'docling' in sys.modules:
-        mod = sys.modules['docling']
-        if hasattr(mod, '__file__') and mod.__file__:
-            mod_file = str(mod.__file__)
-            if 'final_preprocessing' in mod_file:
-                # Сохраняем локальные модули
-                _local_docling_backup = {
-                    k: v for k, v in sys.modules.items() 
-                    if k.startswith('docling')
-                }
-                # Удаляем их
-                for k in list(_local_docling_backup.keys()):
-                    sys.modules.pop(k, None)
-    
-    # Импортируем установленный пакет
-    document_converter_mod = importlib.import_module('docling.document_converter')
-    DocumentConverter = document_converter_mod.DocumentConverter
-    
-    base_models_mod = importlib.import_module('docling.datamodel.base_models')
-    InputFormat = base_models_mod.InputFormat
-    
-    pipeline_options_mod = importlib.import_module('docling.datamodel.pipeline_options')
-    PipelineOptions = pipeline_options_mod.PipelineOptions
-    PdfPipelineOptions = pipeline_options_mod.PdfPipelineOptions
-    VlmPipelineOptions = pipeline_options_mod.VlmPipelineOptions
-    
-    DOCLING_AVAILABLE = True
-except (ImportError, Exception):
-    DOCLING_AVAILABLE = False
-    PipelineOptions = None
-    InputFormat = None
-    DocumentConverter = None
-    PdfPipelineOptions = None
-    VlmPipelineOptions = None
+# Используем централизованный импорт Docling из _docling_import.py
+from ._docling_import import (
+    get_pipeline_options,
+    get_pdf_pipeline_options,
+    get_vlm_pipeline_options,
+    get_input_format,
+    is_docling_available,
+)
+
+# Получаем классы через shared модуль
+PipelineOptions = get_pipeline_options()
+PdfPipelineOptions = get_pdf_pipeline_options()
+VlmPipelineOptions = get_vlm_pipeline_options()
+InputFormat = get_input_format()
+DOCLING_AVAILABLE = is_docling_available()
 
 # Путь к директории с pipeline templates
 TEMPLATES_DIR = Path(__file__).parent / "pipeline_templates"
@@ -69,29 +33,63 @@ TEMPLATES_DIR = Path(__file__).parent / "pipeline_templates"
 logger = logging.getLogger(__name__)
 
 
+@lru_cache(maxsize=32)
+def _load_yaml_file(file_path: str) -> Optional[Tuple]:
+    """
+    Загружает YAML файл с кэшированием.
+
+    Возвращает tuple для совместимости с lru_cache.
+    Кэш сбрасывается только при перезапуске процесса.
+
+    Args:
+        file_path: Путь к YAML файлу
+
+    Returns:
+        Кортеж (yaml_content, mtime) или None если файл не найден
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return None
+
+    try:
+        mtime = path.stat().st_mtime
+        with open(path, "r", encoding="utf-8") as f:
+            content = yaml.safe_load(f)
+        return (content, mtime)
+    except Exception as e:
+        logger.error(f"Failed to load YAML file {file_path}: {e}")
+        return None
+
+
 def load_pipeline_template(route: str) -> Optional[Dict[str, Any]]:
     """
     Загружает pipeline template из YAML файла для указанного route.
-    
+
+    Использует кэширование для избежания повторного чтения с диска.
+
     Args:
         route: Route для загрузки шаблона
-        
+
     Returns:
         Словарь с конфигурацией pipeline или None если шаблон не найден
     """
     template_path = TEMPLATES_DIR / f"{route}.yaml"
-    
+
     if not template_path.exists():
         logger.warning(f"Pipeline template not found for route {route}: {template_path}")
         return None
-    
-    try:
-        with open(template_path, "r", encoding="utf-8") as f:
-            template = yaml.safe_load(f)
-        return template
-    except Exception as e:
-        logger.error(f"Failed to load pipeline template for route {route}: {e}")
+
+    result = _load_yaml_file(str(template_path))
+    if result is None:
         return None
+
+    # result[0] содержит контент YAML
+    return result[0]
+
+
+def clear_template_cache():
+    """Очищает кэш загруженных templates."""
+    _load_yaml_file.cache_clear()
 
 
 def build_docling_options(route: str, manifest: Optional[Dict[str, Any]] = None) -> Optional[PipelineOptions]:
@@ -121,64 +119,90 @@ def build_docling_options(route: str, manifest: Optional[Dict[str, Any]] = None)
 def _build_options_from_template(template: Dict[str, Any]) -> PipelineOptions:
     """
     Строит PipelineOptions из YAML template.
-    
+
+    ВАЖНО: Применяет ВСЕ настройки из YAML, включая:
+    - models.layout - модель для layout detection
+    - models.tables - модель для извлечения таблиц
+    - models.ocr - настройки OCR
+    - docling.* - настройки извлечения (images_scale, generate_page_images и т.д.)
+
     Args:
         template: Словарь с конфигурацией из YAML
-        
+
     Returns:
         PipelineOptions для DocumentConverter
     """
     docling_config = template.get("docling", {})
-    
+    models_config = template.get("models", {})
+    route = template.get("route", "")
+
     # Настройки для PDF
     pdf_opts = None
-    if template.get("route", "").startswith("pdf") or template.get("route") == "image_ocr":
+    if route.startswith("pdf") or route == "image_ocr":
         pdf_opts = PdfPipelineOptions()
-        pdf_config = template.get("models", {})
-        
-        if pdf_config.get("ocr") == "tesseract" or docling_config.get("force_ocr"):
+
+        # === OCR настройки ===
+        ocr_setting = models_config.get("ocr")
+        if ocr_setting == "tesseract" or docling_config.get("force_ocr"):
             pdf_opts.do_ocr = True
+        elif ocr_setting in (None, "off", False):
+            pdf_opts.do_ocr = False
         else:
             pdf_opts.do_ocr = False
-        
-        if pdf_config.get("tables") != "off":
+
+        # === Table extraction настройки (КРИТИЧНО для производительности) ===
+        tables_setting = models_config.get("tables")
+        extract_tables_setting = docling_config.get("extract_tables")
+
+        # Отключаем таблицы если явно указано off или extract_tables=false
+        if tables_setting == "off" or extract_tables_setting is False:
+            pdf_opts.do_table_structure = False
+            logger.info(f"[{route}] Table extraction DISABLED (tables={tables_setting}, extract_tables={extract_tables_setting})")
+        elif tables_setting is not None and tables_setting != "off":
             pdf_opts.do_table_structure = True
-    
+            logger.info(f"[{route}] Table extraction ENABLED with model: {tables_setting}")
+        else:
+            pdf_opts.do_table_structure = False
+            logger.info(f"[{route}] Table extraction DISABLED (default)")
+
+        # === Images scale (оптимизация памяти и скорости) ===
+        if "images_scale" in docling_config:
+            pdf_opts.images_scale = float(docling_config["images_scale"])
+            logger.debug(f"[{route}] images_scale set to {pdf_opts.images_scale}")
+
+        # === Generate page images ===
+        if "generate_page_images" in docling_config:
+            pdf_opts.generate_page_images = bool(docling_config["generate_page_images"])
+            logger.debug(f"[{route}] generate_page_images set to {pdf_opts.generate_page_images}")
+
+        # === Generate picture images ===
+        if "generate_picture_images" in docling_config:
+            pdf_opts.generate_picture_images = bool(docling_config["generate_picture_images"])
+            logger.debug(f"[{route}] generate_picture_images set to {pdf_opts.generate_picture_images}")
+
+        # === Layout model настройки (КРИТИЧНО для производительности) ===
+        layout_setting = models_config.get("layout")
+        if layout_setting == "off" or layout_setting is False:
+            # Отключаем layout detection для ускорения
+            # В Docling это делается через do_layout=False если такой параметр есть
+            if hasattr(pdf_opts, 'do_layout'):
+                pdf_opts.do_layout = False
+            logger.info(f"[{route}] Layout detection DISABLED")
+        elif layout_setting:
+            logger.info(f"[{route}] Layout detection ENABLED with model: {layout_setting}")
+
+        # Логируем итоговую конфигурацию
+        logger.info(f"[{route}] PDF options: do_ocr={pdf_opts.do_ocr}, do_table_structure={pdf_opts.do_table_structure}")
+
     # Создаем PipelineOptions с pdf опциями
-    # Общие настройки Docling применяются через pdf опции, если они есть
     if pdf_opts:
         options = PipelineOptions(pdf=pdf_opts)
     else:
         options = PipelineOptions()
-    
-    # VLM pipeline (если указан в template)
-    # Temporarily disabled due to configuration issues
-    # vlm_config = template.get("models", {}).get("vlm")
-    # if vlm_config:
-    #     try:
-    #         options.vlm = VlmPipelineOptions()
-    #         vlm_endpoint = os.environ.get("VLM_ENDPOINT")
-    #         if vlm_endpoint:
-    #             options.vlm.endpoint = vlm_endpoint
-    #         vlm_model = os.environ.get("VLM_MODEL", vlm_config.get("model", "default"))
-    #         if hasattr(options.vlm, "model"):
-    #             options.vlm.model = vlm_model
-    #         
-    #         # TODO: Cloud.ru integration placeholder
-    #         # Future integration for Granite model:
-    #         # if vlm_model == "granite_docling":
-    #         #     options.vlm.provider = "cloud_ru"
-    #         #     options.vlm.model_path = "run granite_docling"
-    #     except Exception:
-    #         pass
-    
-    # OCR options
-    # TODO: Cloud.ru integration placeholder for PaddleOCR
-    # if template.get("models", {}).get("ocr") == "paddle_ocr_vlm":
-    #     if hasattr(options, 'ocr_options'):
-    #         options.ocr_options.provider = "cloud_ru"
-    #         options.ocr_options.docker_image = "PaddleOCR_VLM:@ocr_vl"
-    
+
+    # VLM pipeline не используется для digital форматов.
+    # Для OCR (pdf_scan, image_ocr) VLM будет добавлен в отдельной задаче.
+
     return options
 
 

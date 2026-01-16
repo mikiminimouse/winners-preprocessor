@@ -68,7 +68,11 @@ class BaseEngine(ABC):
             Новый путь к юниту
         """
         unit_id = unit_path.name
-        target_dir = exceptions_base / f"Exceptions_{cycle}" / reason / unit_id
+        # НОВАЯ СТРУКТУРА v2: Exceptions/Direct для цикла 1, Exceptions/Processed_N для остальных
+        if cycle == 1:
+            target_dir = exceptions_base / "Direct" / reason / unit_id
+        else:
+            target_dir = exceptions_base / f"Processed_{cycle}" / reason / unit_id
         
         if self.dry_run:
             logger.info(f"[DRY RUN] Would move {unit_id} to {target_dir}")

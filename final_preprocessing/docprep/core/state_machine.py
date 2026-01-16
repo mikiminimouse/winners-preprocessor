@@ -65,7 +65,7 @@ ALLOWED_TRANSITIONS: Dict[UnitState, List[UnitState]] = {
         UnitState.MERGER_SKIPPED,
     ],
     UnitState.MERGED_DIRECT: [UnitState.READY_FOR_DOCLING, UnitState.MERGER_SKIPPED],
-    UnitState.MERGED_PROCESSED: [UnitState.READY_FOR_DOCLING, UnitState.MERGER_SKIPPED],
+    UnitState.MERGED_PROCESSED: [UnitState.READY_FOR_DOCLING, UnitState.MERGER_SKIPPED, UnitState.MERGED_PROCESSED],  # Рефлексивный переход для повторной обработки
     # Финальные состояния (разрешаем переходы для переобработки/спасения)
     UnitState.READY_FOR_DOCLING: [],
     UnitState.EXCEPTION_1: [UnitState.CLASSIFIED_1],
